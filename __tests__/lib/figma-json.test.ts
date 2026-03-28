@@ -23,10 +23,10 @@ function makeNode(overrides: Partial<ComponentNode> = {}): ComponentNode {
   };
 }
 
-describe('generateFigmaDesignSpec', () => {
+describe('generateFigmaDesignSpec v2', () => {
   it('returns correct version and source info', () => {
     const spec = generateFigmaDesignSpec([], mockMetadata, 'https://example.com', '2026-01-01');
-    expect(spec.version).toBe('1.0');
+    expect(spec.version).toBe('2.0');
     expect(spec.source.url).toBe('https://example.com');
     expect(spec.source.title).toBe('Test Page');
   });
@@ -34,37 +34,23 @@ describe('generateFigmaDesignSpec', () => {
   it('creates a page with correct dimensions', () => {
     const nodes = [makeNode({ rect: { x: 0, y: 0, width: 1440, height: 800 } })];
     const spec = generateFigmaDesignSpec(nodes, mockMetadata, 'https://example.com', '2026-01-01');
-
-    expect(spec.pages).toHaveLength(1);
-    expect(spec.pages[0].name).toBe('Test Page');
-    expect(spec.pages[0].width).toBeGreaterThanOrEqual(1440);
+    expect(spec.page.name).toBe('Test Page');
+    expect(spec.page.width).toBe(1440);
   });
 
-  it('converts nodes to Figma frames', () => {
+  it('flattens nodes with background to elements', () => {
     const nodes = [
       makeNode({
-        children: [makeNode({ id: 'child-1', tag: 'div', depth: 1 })],
-        styles: {
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '16px',
-          padding: '20px',
-          backgroundColor: '#1a1a1a',
-        },
+        styles: { backgroundColor: '#1a1a1a' },
       }),
     ];
-
     const spec = generateFigmaDesignSpec(nodes, mockMetadata, 'https://example.com', '2026-01-01');
-    const frame = spec.pages[0].children[0];
-
-    expect(frame.type).toBe('FRAME');
-    expect(frame.layoutMode).toBe('VERTICAL');
-    expect(frame.itemSpacing).toBe(16);
-    expect(frame.paddingTop).toBe(20);
-    expect(frame.fills).toEqual([{ type: 'SOLID', color: '#1a1a1a' }]);
+    const el = spec.page.elements.find((e) => e.backgroundColor === '#1a1a1a');
+    expect(el).toBeDefined();
+    expect(el!.type).toBe('FRAME');
   });
 
-  it('converts text nodes correctly', () => {
+  it('creates text elements with correct properties', () => {
     const nodes = [
       makeNode({
         tag: 'h1',
@@ -76,108 +62,112 @@ describe('generateFigmaDesignSpec', () => {
           fontWeight: '700',
           fontFamily: '"Inter", sans-serif',
         },
+        rect: { x: 100, y: 50, width: 400, height: 40 },
       }),
     ];
-
     const spec = generateFigmaDesignSpec(nodes, mockMetadata, 'https://example.com', '2026-01-01');
-    const frame = spec.pages[0].children[0];
-
-    expect(frame.type).toBe('TEXT');
-    expect(frame.characters).toBe('Hello World');
-    expect(frame.textStyle?.fontFamily).toBe('Inter');
-    expect(frame.textStyle?.fontSize).toBe(32);
-    expect(frame.textStyle?.fontWeight).toBe(700);
-    expect(frame.fills).toEqual([{ type: 'SOLID', color: '#ffffff' }]);
+    const textEl = spec.page.elements.find((e) => e.type === 'TEXT');
+    expect(textEl).toBeDefined();
+    expect(textEl!.characters).toBe('Hello World');
+    expect(textEl!.fontFamily).toBe('Inter');
+    expect(textEl!.fontSize).toBe(32);
+    expect(textEl!.fontWeight).toBe(700);
+    expect(textEl!.textColor).toBe('#ffffff');
   });
 
-  it('converts image nodes correctly', () => {
+  it('creates image elements with URL', () => {
     const nodes = [
       makeNode({
         tag: 'img',
         type: 'image',
         children: [],
-        attributes: { src: 'https://example.com/img.png', alt: 'Test' },
+        attributes: { src: 'https://example.com/img.png' },
+        rect: { x: 0, y: 0, width: 200, height: 150 },
       }),
     ];
-
     const spec = generateFigmaDesignSpec(nodes, mockMetadata, 'https://example.com', '2026-01-01');
-    const frame = spec.pages[0].children[0];
-
-    expect(frame.type).toBe('IMAGE');
-    expect(frame.imageUrl).toBe('https://example.com/img.png');
+    const imgEl = spec.page.elements.find((e) => e.type === 'IMAGE');
+    expect(imgEl).toBeDefined();
+    expect(imgEl!.imageUrl).toBe('https://example.com/img.png');
   });
 
-  it('extracts design tokens', () => {
+  it('preserves absolute positions from rects', () => {
     const nodes = [
       makeNode({
-        styles: {
-          backgroundColor: '#1a1a1a',
-          color: '#ffffff',
-          fontSize: '16px',
-          fontFamily: 'Inter',
-          fontWeight: '400',
-          gap: '8px',
-          padding: '16px 24px',
-        },
+        styles: { backgroundColor: '#ff0000' },
+        rect: { x: 100, y: 200, width: 300, height: 150 },
       }),
     ];
-
     const spec = generateFigmaDesignSpec(nodes, mockMetadata, 'https://example.com', '2026-01-01');
-
-    expect(spec.designTokens.colors.length).toBeGreaterThan(0);
-    expect(spec.designTokens.colors.some((c) => c.hex === '#1a1a1a')).toBe(true);
-    expect(spec.designTokens.colors.some((c) => c.hex === '#ffffff')).toBe(true);
-
-    expect(spec.designTokens.typography.length).toBeGreaterThan(0);
-    expect(spec.designTokens.typography[0].fontFamily).toBe('Inter');
-
-    expect(spec.designTokens.spacing).toContain(8);
-    expect(spec.designTokens.spacing).toContain(16);
-    expect(spec.designTokens.spacing).toContain(24);
+    const el = spec.page.elements[0];
+    expect(el.x).toBe(100);
+    expect(el.width).toBe(300);
+    expect(el.height).toBe(150);
   });
 
-  it('handles nested children', () => {
+  it('handles border radius', () => {
     const nodes = [
       makeNode({
-        children: [
-          makeNode({ id: 'child-1', tag: 'div', depth: 1 }),
-          makeNode({ id: 'child-2', tag: 'p', textContent: 'Text', depth: 1 }),
-        ],
+        styles: { backgroundColor: '#000', borderRadius: '12px' },
+        rect: { x: 0, y: 0, width: 100, height: 100 },
       }),
     ];
-
     const spec = generateFigmaDesignSpec(nodes, mockMetadata, 'https://example.com', '2026-01-01');
-    const frame = spec.pages[0].children[0];
-
-    expect(frame.children).toHaveLength(2);
+    expect(spec.page.elements[0].borderRadius).toBe(12);
   });
 
   it('handles empty tree', () => {
     const spec = generateFigmaDesignSpec([], mockMetadata, 'https://example.com', '2026-01-01');
-    expect(spec.pages[0].children).toHaveLength(0);
-    expect(spec.designTokens.colors).toHaveLength(0);
+    expect(spec.page.elements).toHaveLength(0);
   });
 
-  it('maps flex-direction row to HORIZONTAL', () => {
+  it('skips elements without visual content', () => {
     const nodes = [
       makeNode({
-        children: [makeNode({ id: 'child-1', tag: 'span', depth: 1 })],
-        styles: { display: 'flex' },
+        // No background, no text, no image, no border
+        styles: {},
+        rect: { x: 0, y: 0, width: 100, height: 100 },
       }),
     ];
-
     const spec = generateFigmaDesignSpec(nodes, mockMetadata, 'https://example.com', '2026-01-01');
-    expect(spec.pages[0].children[0].layoutMode).toBe('HORIZONTAL');
+    // Should not create element for invisible container
+    expect(spec.page.elements).toHaveLength(0);
   });
 
-  it('handles corner radius', () => {
+  it('flattens nested children to absolute positions', () => {
     const nodes = [
       makeNode({
-        styles: { borderRadius: '12px' },
+        styles: { backgroundColor: '#111' },
+        rect: { x: 0, y: 0, width: 1440, height: 500 },
+        children: [
+          makeNode({
+            id: 'child-1',
+            tag: 'h1',
+            textContent: 'Title',
+            depth: 1,
+            styles: { fontSize: '24px', color: '#fff' },
+            rect: { x: 50, y: 50, width: 300, height: 30 },
+          }),
+        ],
       }),
     ];
-
     const spec = generateFigmaDesignSpec(nodes, mockMetadata, 'https://example.com', '2026-01-01');
-    expect(spec.pages[0].children[0].cornerRadius).toBe(12);
+    // Should have both parent frame and child text
+    expect(spec.page.elements.length).toBe(2);
+    const textEl = spec.page.elements.find((e) => e.type === 'TEXT');
+    expect(textEl).toBeDefined();
+    expect(textEl!.x).toBe(50);
+  });
+
+  it('converts rgb colors to hex', () => {
+    const nodes = [
+      makeNode({
+        styles: { backgroundColor: 'rgb(255, 0, 0)' },
+        rect: { x: 0, y: 0, width: 100, height: 100 },
+      }),
+    ];
+    const spec = generateFigmaDesignSpec(nodes, mockMetadata, 'https://example.com', '2026-01-01');
+    // backgroundColor should still work (toHex handles rgb)
+    expect(spec.page.elements[0].backgroundColor).toBe('#ff0000');
   });
 });

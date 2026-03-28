@@ -126,7 +126,7 @@ var __async = (__this, __arguments, generator) => {
     const r = parseInt(h.substring(0, 2), 16) / 255;
     const g = parseInt(h.substring(2, 4), 16) / 255;
     const b = parseInt(h.substring(4, 6), 16) / 255;
-    return { r, g, b };
+    return { r: isNaN(r) ? 0 : r, g: isNaN(g) ? 0 : g, b: isNaN(b) ? 0 : b };
   }
   function loadFont(family, weight) {
     return __async(this, null, function* () {
@@ -148,142 +148,110 @@ var __async = (__this, __arguments, generator) => {
       }
     });
   }
-  function buildNode(spec, parent) {
+  function createElementInFrame(el, parent) {
     return __async(this, null, function* () {
-      var _a, _b, _c, _d, _e;
-      if (spec.type === "TEXT" && spec.characters) {
+      if (el.type === "TEXT" && el.characters) {
         const text = figma.createText();
-        const font = yield loadFont(
-          ((_a = spec.textStyle) == null ? void 0 : _a.fontFamily) || "Inter",
-          ((_b = spec.textStyle) == null ? void 0 : _b.fontWeight) || 400
-        );
+        const font = yield loadFont(el.fontFamily || "Inter", el.fontWeight || 400);
         text.fontName = font;
-        text.characters = spec.characters;
-        text.name = spec.name || "Text";
-        if ((_c = spec.textStyle) == null ? void 0 : _c.fontSize) text.fontSize = spec.textStyle.fontSize;
-        if (((_d = spec.textStyle) == null ? void 0 : _d.lineHeight) && spec.textStyle.lineHeight > 0) {
-          text.lineHeight = { value: spec.textStyle.lineHeight, unit: "PIXELS" };
-        }
-        if ((_e = spec.textStyle) == null ? void 0 : _e.letterSpacing) {
-          text.letterSpacing = { value: spec.textStyle.letterSpacing, unit: "PIXELS" };
-        }
-        if (spec.fills && spec.fills.length > 0) {
-          text.fills = spec.fills.map((f) => {
-            var _a2;
-            return {
-              type: "SOLID",
-              color: hexToRgb(f.color),
-              opacity: (_a2 = f.opacity) != null ? _a2 : 1
-            };
-          });
-        }
-        text.layoutAlign = "STRETCH";
-        text.layoutGrow = 0;
+        text.characters = el.characters;
+        text.name = el.name || "Text";
+        text.x = el.x;
+        text.y = el.y;
+        text.resize(Math.max(1, el.width), Math.max(1, el.height));
         text.textAutoResize = "HEIGHT";
+        if (el.fontSize) text.fontSize = el.fontSize;
+        if (el.lineHeight && el.lineHeight > 0) {
+          text.lineHeight = { value: el.lineHeight, unit: "PIXELS" };
+        }
+        if (el.letterSpacing) {
+          text.letterSpacing = { value: el.letterSpacing, unit: "PIXELS" };
+        }
+        if (el.textAlign === "center") text.textAlignHorizontal = "CENTER";
+        else if (el.textAlign === "right") text.textAlignHorizontal = "RIGHT";
+        if (el.textColor) {
+          text.fills = [{ type: "SOLID", color: hexToRgb(el.textColor) }];
+        }
         parent.appendChild(text);
-        return text;
+        return;
       }
-      if (spec.type === "IMAGE" && spec.imageBase64) {
-        const frame2 = figma.createRectangle();
-        frame2.name = spec.name || "Image";
-        frame2.resize(Math.max(1, spec.width), Math.max(1, spec.height));
-        frame2.layoutAlign = "STRETCH";
-        try {
-          const raw = figma.base64Decode(spec.imageBase64);
-          const image = figma.createImage(raw);
-          frame2.fills = [{
-            type: "IMAGE",
-            scaleMode: "FILL",
-            imageHash: image.hash
-          }];
-        } catch (e) {
-          frame2.fills = [{ type: "SOLID", color: { r: 0.85, g: 0.85, b: 0.85 } }];
+      if (el.type === "IMAGE") {
+        const rect2 = figma.createRectangle();
+        rect2.name = el.name || "Image";
+        rect2.x = el.x;
+        rect2.y = el.y;
+        rect2.resize(Math.max(1, el.width), Math.max(1, el.height));
+        if (el.imageBase64) {
+          try {
+            const raw = figma.base64Decode(el.imageBase64);
+            const image = figma.createImage(raw);
+            rect2.fills = [{
+              type: "IMAGE",
+              scaleMode: "FILL",
+              imageHash: image.hash
+            }];
+          } catch (e) {
+            rect2.fills = [{ type: "SOLID", color: { r: 0.85, g: 0.85, b: 0.85 } }];
+          }
+        } else {
+          rect2.fills = [{ type: "SOLID", color: { r: 0.9, g: 0.9, b: 0.9 } }];
         }
-        if (spec.cornerRadius != null && spec.cornerRadius > 0) {
-          frame2.cornerRadius = spec.cornerRadius;
+        if (el.borderRadius && el.borderRadius > 0) {
+          rect2.cornerRadius = el.borderRadius;
         }
-        parent.appendChild(frame2);
-        return frame2;
+        parent.appendChild(rect2);
+        return;
       }
-      const frame = figma.createFrame();
-      frame.name = spec.name || "Frame";
-      frame.resize(Math.max(1, spec.width), Math.max(1, spec.height));
-      frame.layoutAlign = "STRETCH";
-      if (spec.layoutMode === "HORIZONTAL" || spec.layoutMode === "VERTICAL") {
-        frame.layoutMode = spec.layoutMode;
-        frame.primaryAxisSizingMode = "AUTO";
-        frame.counterAxisSizingMode = "FIXED";
-        if (spec.itemSpacing != null) frame.itemSpacing = spec.itemSpacing;
-        if (spec.primaryAxisAlignItems) frame.primaryAxisAlignItems = spec.primaryAxisAlignItems;
-        if (spec.counterAxisAlignItems) frame.counterAxisAlignItems = spec.counterAxisAlignItems;
-      }
-      if (spec.paddingTop != null) frame.paddingTop = spec.paddingTop;
-      if (spec.paddingRight != null) frame.paddingRight = spec.paddingRight;
-      if (spec.paddingBottom != null) frame.paddingBottom = spec.paddingBottom;
-      if (spec.paddingLeft != null) frame.paddingLeft = spec.paddingLeft;
-      if (spec.fills && spec.fills.length > 0) {
-        frame.fills = spec.fills.map((f) => {
-          var _a2;
-          return {
-            type: "SOLID",
-            color: hexToRgb(f.color),
-            opacity: (_a2 = f.opacity) != null ? _a2 : 1
-          };
-        });
+      const rect = figma.createRectangle();
+      rect.name = el.name || "Frame";
+      rect.x = el.x;
+      rect.y = el.y;
+      rect.resize(Math.max(1, el.width), Math.max(1, el.height));
+      if (el.backgroundColor) {
+        rect.fills = [{ type: "SOLID", color: hexToRgb(el.backgroundColor) }];
       } else {
-        frame.fills = [];
+        rect.fills = [];
       }
-      if (spec.strokes && spec.strokes.length > 0) {
-        frame.strokes = spec.strokes.map((s) => ({
-          type: "SOLID",
-          color: hexToRgb(s.color)
-        }));
-        frame.strokeWeight = spec.strokes[0].weight;
+      if (el.borderWidth && el.borderWidth > 0 && el.borderColor) {
+        rect.strokes = [{ type: "SOLID", color: hexToRgb(el.borderColor) }];
+        rect.strokeWeight = el.borderWidth;
       }
-      if (spec.cornerRadius != null && spec.cornerRadius > 0) {
-        frame.cornerRadius = spec.cornerRadius;
+      if (el.borderRadius && el.borderRadius > 0) {
+        rect.cornerRadius = el.borderRadius;
       }
-      if (spec.opacity != null) {
-        frame.opacity = spec.opacity;
+      if (el.opacity != null && el.opacity < 1) {
+        rect.opacity = el.opacity;
       }
-      parent.appendChild(frame);
-      if (spec.children && spec.children.length > 0) {
-        for (const child of spec.children) {
-          yield buildNode(child, frame);
-        }
-      }
-      return frame;
+      parent.appendChild(rect);
     });
   }
   function createDesignFromSpec(spec) {
     return __async(this, null, function* () {
-      const createdIds = [];
-      for (const pageSpec of spec.pages) {
-        const pageFrame = figma.createFrame();
-        pageFrame.name = pageSpec.name || "Cloned Page";
-        pageFrame.resize(Math.max(1, pageSpec.width), Math.max(1, pageSpec.height));
-        pageFrame.x = 0;
-        pageFrame.y = 0;
-        pageFrame.layoutMode = "VERTICAL";
-        pageFrame.primaryAxisSizingMode = "AUTO";
-        pageFrame.counterAxisSizingMode = "FIXED";
-        pageFrame.itemSpacing = 0;
-        if (pageSpec.backgroundColor) {
-          pageFrame.fills = [{
-            type: "SOLID",
-            color: hexToRgb(pageSpec.backgroundColor)
-          }];
-        } else {
-          pageFrame.fills = [{ type: "SOLID", color: { r: 1, g: 1, b: 1 } }];
-        }
-        figma.currentPage.appendChild(pageFrame);
-        for (const child of pageSpec.children) {
-          yield buildNode(child, pageFrame);
-        }
-        createdIds.push(pageFrame.id);
-        figma.viewport.scrollAndZoomIntoView([pageFrame]);
+      const page = spec.page;
+      if (!page || !page.elements) {
+        throw new Error("Invalid spec: missing page.elements");
       }
-      return createdIds;
+      const pageFrame = figma.createFrame();
+      pageFrame.name = page.name || "Cloned Page";
+      pageFrame.resize(Math.max(1, page.width), Math.max(1, page.height));
+      pageFrame.x = 0;
+      pageFrame.y = 0;
+      pageFrame.clipsContent = true;
+      if (page.backgroundColor) {
+        pageFrame.fills = [{ type: "SOLID", color: hexToRgb(page.backgroundColor) }];
+      } else {
+        pageFrame.fills = [{ type: "SOLID", color: { r: 1, g: 1, b: 1 } }];
+      }
+      figma.currentPage.appendChild(pageFrame);
+      for (const el of page.elements) {
+        try {
+          yield createElementInFrame(el, pageFrame);
+        } catch (err) {
+          console.error(`Failed to create element ${el.name}:`, err);
+        }
+      }
+      figma.viewport.scrollAndZoomIntoView([pageFrame]);
+      return [pageFrame.id];
     });
   }
   const sendStatus = () => {
