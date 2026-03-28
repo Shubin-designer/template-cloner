@@ -1,0 +1,15 @@
+{
+  "name": "SiteCloner Bridge",
+  "id": "sitecloner-figma-bridge",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "index.html",
+  "permissions": [],
+  "networkAccess": {
+    "allowedDomains": ["ws://localhost:1994"],
+    "reasoning": "Connects to SiteCloner app to receive cloned website designs"
+  },
+  "documentAccess": "dynamic-page",
+  "editorType": ["figma", "dev"],
+  "capabilities": ["inspect"]
+}

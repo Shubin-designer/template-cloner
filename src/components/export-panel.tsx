@@ -9,8 +9,6 @@ import { Palette, Copy, Download, Code2, Send, Loader2, CheckCircle, XCircle } f
 import { toast } from 'sonner';
 import { generateFigmaDesignSpec } from '@/lib/export/figma-json';
 
-const BRIDGE_URL = 'http://localhost:1994';
-
 interface ExportPanelProps {
   data: ScrapeResult;
 }
@@ -28,16 +26,15 @@ export function ExportPanel({ data }: ExportPanelProps) {
 
   async function checkBridge(): Promise<boolean> {
     try {
-      const res = await fetch(`${BRIDGE_URL}/ping`, { signal: AbortSignal.timeout(3000) });
-      if (res.ok) {
-        setBridgeStatus('connected');
-        return true;
-      }
+      const res = await fetch('/api/figma-bridge', { signal: AbortSignal.timeout(3000) });
+      const data = await res.json();
+      const connected = data.pluginConnected === true;
+      setBridgeStatus(connected ? 'connected' : 'disconnected');
+      return connected;
     } catch {
-      // bridge not running
+      setBridgeStatus('disconnected');
+      return false;
     }
-    setBridgeStatus('disconnected');
-    return false;
   }
 
   async function handleSendToFigma() {
@@ -45,15 +42,15 @@ export function ExportPanel({ data }: ExportPanelProps) {
 
     const alive = await checkBridge();
     if (!alive) {
-      toast.error('Figma Bridge not running', {
-        description: 'Start the Figma MCP Bridge plugin and server first.',
+      toast.error('Figma plugin not connected', {
+        description: 'Open the MCP Bridge plugin in Figma.',
       });
       setSending(false);
       return;
     }
 
     try {
-      const res = await fetch(`${BRIDGE_URL}/api/create-design`, {
+      const res = await fetch('/api/figma-bridge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(figmaSpec),
@@ -70,9 +67,8 @@ export function ExportPanel({ data }: ExportPanelProps) {
       }
     } catch (error) {
       toast.error('Connection error', {
-        description: 'Could not reach the Figma Bridge server.',
+        description: error instanceof Error ? error.message : 'Unknown error',
       });
-      console.error('Send to Figma error:', error);
     } finally {
       setSending(false);
     }
