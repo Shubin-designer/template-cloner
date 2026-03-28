@@ -99,6 +99,11 @@ function convertNode(node: ComponentNode): FigmaNode {
   const isImg = node.tag === 'img' || node.tag === 'svg';
   const isText = !!(node.textContent && node.children.length === 0 && !isImg);
   const hasChildren = node.children.length > 0;
+  // Detect centering from CSS
+  const isCentered = s.textAlign === 'center' ||
+    s.alignItems === 'center' ||
+    s.justifyContent === 'center' ||
+    (s.margin && s.margin.includes('auto'));
 
   const w = Math.max(1, node.rect?.width || px(s.width) || 100);
   const h = Math.max(1, node.rect?.height || px(s.height) || 20);
@@ -133,6 +138,14 @@ function convertNode(node: ComponentNode): FigmaNode {
       figNode.itemSpacing = px(s.gap) || 0;
       figNode.primaryAxisAlignItems = mapAlign(s.justifyContent);
       figNode.counterAxisAlignItems = mapCrossAlign(s.alignItems);
+
+      // Apply centering: if text-align center or margin auto, center children
+      if (isCentered) {
+        figNode.counterAxisAlignItems = 'CENTER';
+        if (figNode.layoutMode === 'VERTICAL') {
+          figNode.counterAxisAlignItems = 'CENTER';
+        }
+      }
     }
 
     // Padding

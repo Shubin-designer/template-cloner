@@ -129,7 +129,8 @@ export async function buildComponentTree(page: Page): Promise<ComponentNode[]> {
         return true;
       }
 
-      function getTextContent(el: Element): string {
+      function getDirectText(el: Element): string {
+        // Get only direct text nodes (not from children)
         let text = '';
         for (const child of Array.from(el.childNodes)) {
           if (child.nodeType === Node.TEXT_NODE) {
@@ -138,6 +139,24 @@ export async function buildComponentTree(page: Page): Promise<ComponentNode[]> {
           }
         }
         return text.slice(0, 500);
+      }
+
+      function getFullText(el: Element): string {
+        // Get ALL text including from inline children (spans, a, strong, em, etc.)
+        return (el.textContent || '').trim().slice(0, 500);
+      }
+
+      // Inline elements that don't create separate visual blocks
+      const INLINE_TAGS = new Set([
+        'span', 'strong', 'em', 'b', 'i', 'u', 'a', 'mark', 'small',
+        'sub', 'sup', 'abbr', 'code', 'kbd', 'var', 'br',
+      ]);
+
+      function hasOnlyInlineChildren(el: Element): boolean {
+        for (const child of Array.from(el.children)) {
+          if (!INLINE_TAGS.has(child.tagName.toLowerCase())) return false;
+        }
+        return true;
       }
 
       interface TreeNodeData {
@@ -178,15 +197,28 @@ export async function buildComponentTree(page: Page): Promise<ComponentNode[]> {
 
         const type = classify(tag, className || '', elId || '', depth, isLargeSection);
         const styles = extractStyles(el);
-        const textContent = getTextContent(el);
 
-        // Build children
+        // Text extraction strategy:
+        // If element has ONLY inline children (span, strong, a, etc.),
+        // treat it as a text element with full text content.
+        // This handles: <h1>Welcome <span>back!</span></h1> → "Welcome back!"
+        const onlyInline = hasOnlyInlineChildren(el);
+        let textContent: string;
+        if (onlyInline && el.children.length > 0) {
+          textContent = getFullText(el);
+        } else {
+          textContent = getDirectText(el);
+        }
+
+        // Build children — skip inline children if we already got full text
         const children: TreeNodeData[] = [];
-        const childElements = el.children;
-        const limit = Math.min(childElements.length, maxChildren);
-        for (let i = 0; i < limit; i++) {
-          const child = walk(childElements[i], depth + 1);
-          if (child) children.push(child);
+        if (!onlyInline || el.children.length === 0) {
+          const childElements = el.children;
+          const childLimit = Math.min(childElements.length, maxChildren);
+          for (let i = 0; i < childLimit; i++) {
+            const child = walk(childElements[i], depth + 1);
+            if (child) children.push(child);
+          }
         }
 
         // Collect attributes
@@ -194,6 +226,8 @@ export async function buildComponentTree(page: Page): Promise<ComponentNode[]> {
         if (tag === 'a') {
           const href = el.getAttribute('href');
           if (href) attributes.href = href;
+          // Link text
+          if (!textContent) textContent = getFullText(el);
         }
         if (tag === 'img') {
           const src = el.getAttribute('src');
@@ -203,6 +237,17 @@ export async function buildComponentTree(page: Page): Promise<ComponentNode[]> {
         }
         if (tag === 'svg') {
           attributes.svg = 'true';
+        }
+        // Input placeholder as text content
+        if (tag === 'input' || tag === 'textarea') {
+          const placeholder = el.getAttribute('placeholder');
+          if (placeholder && !textContent) textContent = placeholder;
+          const inputType = el.getAttribute('type');
+          if (inputType) attributes.type = inputType;
+        }
+        // Button text
+        if (tag === 'button' && !textContent) {
+          textContent = getFullText(el);
         }
 
         return {
