@@ -504,8 +504,8 @@ var __async = (__this, __arguments, generator) => {
         }
         case "create_design": {
           const spec = request.params;
-          if (!spec || !spec.pages) {
-            throw new Error("Invalid design spec: missing pages");
+          if (!spec || !spec.page || !spec.page.elements) {
+            throw new Error("Invalid design spec: missing page.elements");
           }
           const createdIds = yield createDesignFromSpec(spec);
           return {

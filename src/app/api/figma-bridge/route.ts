@@ -27,17 +27,32 @@ export async function POST(request: NextRequest) {
     const connected = await bridge.checkPluginConnected();
     if (!connected) {
       return NextResponse.json({
-        error: 'Figma plugin not connected. Open the SiteCloner Bridge plugin in Figma and keep it running.',
+        error: 'Figma plugin not connected. Open the SiteCloner Bridge plugin in Figma.',
       }, { status: 503 });
     }
 
     const spec = await request.json();
 
-    if (!spec.page || !spec.page.elements) {
-      return NextResponse.json({ error: 'Invalid design spec' }, { status: 400 });
+    // Support both v2 (spec.page) and v1 (spec.pages) formats
+    const page = spec.page || (spec.pages && spec.pages[0]);
+    const elements = page?.elements || page?.children;
+
+    if (!page || !elements) {
+      console.error('[figma-bridge] Invalid spec keys:', Object.keys(spec));
+      return NextResponse.json({
+        error: `Invalid design spec. Got keys: ${Object.keys(spec).join(', ')}`,
+      }, { status: 400 });
     }
 
-    // Pre-fetch all images and inject base64 data
+    // Normalize to v2 format
+    if (!spec.page) {
+      spec.page = { ...page, elements: elements };
+    }
+    if (!spec.page.elements && spec.page.children) {
+      spec.page.elements = spec.page.children;
+    }
+
+    // Pre-fetch images
     const sourceUrl = spec.source?.url || '';
     const imageUrls = collectImageUrls(spec.page.elements);
     if (imageUrls.length > 0) {
@@ -53,6 +68,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ data: result.data });
   } catch (error) {
+    console.error('[figma-bridge] Error:', error);
     return NextResponse.json({
       error: error instanceof Error ? error.message : String(error),
     }, { status: 500 });
