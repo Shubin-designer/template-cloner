@@ -75,13 +75,16 @@ export function UrlInput() {
         toast.info('Sending to Figma...', { description: 'Creating frames and layout...' });
 
         try {
-          const { generateFigmaDesignSpec } = await import('@/lib/export/figma-json');
-          const spec = generateFigmaDesignSpec(data.tree, data.metadata, data.url, data.createdAt);
+          const payload = {
+            figmaTree: data.figmaData || data.tree,
+            pageInfo: { name: data.metadata.title || 'Cloned Page', width: 1440, height: 3000 },
+            sourceUrl: data.url,
+          };
 
           const figmaRes = await fetch('/api/figma-bridge', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(spec),
+            body: JSON.stringify(payload),
           });
 
           const figmaResult = await figmaRes.json();

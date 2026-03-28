@@ -7,6 +7,7 @@ export interface ScrapeResult {
   screenshot: string; // base64 PNG
   tree: ComponentNode[];
   metadata: PageMetadata;
+  figmaData?: unknown; // Raw html-to-figma output for direct Figma export
   createdAt: string;
 }
 

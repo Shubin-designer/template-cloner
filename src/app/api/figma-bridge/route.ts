@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ensureBridgeRunning } from '@/lib/figma-bridge/server';
-import { collectImageUrls, injectImageBase64 } from '@/lib/export/figma-json';
 import { fetchImagesAsBase64 } from '@/lib/export/image-fetcher';
 
 export async function GET() {
@@ -26,22 +25,26 @@ export async function POST(request: NextRequest) {
       }, { status: 503 });
     }
 
-    const spec = await request.json();
+    const body = await request.json();
 
-    // v3 format: spec.page.children
-    const children = spec.page?.children;
-    if (!children || !Array.isArray(children)) {
-      console.error('[figma-bridge] Invalid spec. Keys:', Object.keys(spec), 'page keys:', spec.page ? Object.keys(spec.page) : 'none');
-      return NextResponse.json({ error: 'Invalid design spec: missing page.children' }, { status: 400 });
+    // Expect { figmaTree, pageInfo, sourceUrl }
+    if (!body.figmaTree) {
+      return NextResponse.json({ error: 'Missing figmaTree data' }, { status: 400 });
     }
 
-    // Pre-fetch images
-    const sourceUrl = spec.source?.url || '';
-    const imageUrls = collectImageUrls(children);
-    if (imageUrls.length > 0) {
-      const imageMap = await fetchImagesAsBase64(imageUrls, sourceUrl);
-      injectImageBase64(children, imageMap);
+    // Collect image URLs from the tree and pre-fetch them
+    const imageUrls = collectImageUrlsFromTree(body.figmaTree);
+    let imageMap = new Map<string, string>();
+    if (imageUrls.length > 0 && body.sourceUrl) {
+      imageMap = await fetchImagesAsBase64(imageUrls, body.sourceUrl);
     }
+
+    // Send to plugin with image data
+    const spec = {
+      figmaTree: body.figmaTree,
+      pageInfo: body.pageInfo || { name: 'Cloned Page', width: 1440, height: 900 },
+      images: Object.fromEntries(imageMap),
+    };
 
     const result = await bridge.createDesign(spec);
     if (result.error) {
@@ -54,4 +57,20 @@ export async function POST(request: NextRequest) {
       error: error instanceof Error ? error.message : String(error),
     }, { status: 500 });
   }
+}
+
+function collectImageUrlsFromTree(node: Record<string, unknown>): string[] {
+  const urls: string[] = [];
+  function walk(n: Record<string, unknown>) {
+    if (n.imageUrl && typeof n.imageUrl === 'string') {
+      urls.push(n.imageUrl);
+    }
+    if (Array.isArray(n.children)) {
+      for (const child of n.children) {
+        walk(child as Record<string, unknown>);
+      }
+    }
+  }
+  walk(node);
+  return urls;
 }

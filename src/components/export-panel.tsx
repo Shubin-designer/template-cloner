@@ -50,10 +50,23 @@ export function ExportPanel({ data }: ExportPanelProps) {
     }
 
     try {
+      // Send html-to-figma data if available, fallback to our converter
+      const payload = data.figmaData
+        ? {
+            figmaTree: data.figmaData,
+            pageInfo: { name: data.metadata.title || 'Cloned Page', width: 1440, height: 3000 },
+            sourceUrl: data.url,
+          }
+        : {
+            figmaTree: figmaSpec,
+            pageInfo: { name: data.metadata.title || 'Cloned Page', width: 1440, height: 3000 },
+            sourceUrl: data.url,
+          };
+
       const res = await fetch('/api/figma-bridge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(figmaSpec),
+        body: JSON.stringify(payload),
       });
 
       const result = await res.json();

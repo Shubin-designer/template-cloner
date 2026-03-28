@@ -1,6 +1,7 @@
 import { chromium, type Browser, type Page } from 'playwright';
 import type { ScrapeResult, PageMetadata } from '@/types/clone';
 import { buildComponentTree } from '@/lib/parser/tree-builder';
+import { convertPageToFigmaNodes } from '@/lib/export/html-to-figma-converter';
 import { v4 as uuidv4 } from 'uuid';
 
 let browser: Browser | null = null;
@@ -130,11 +131,15 @@ export async function scrapePage(url: string): Promise<ScrapeResult> {
     await page.waitForTimeout(1500);
 
     // Extract data in parallel
-    const [html, screenshotBuffer, metadata, tree] = await Promise.all([
+    const [html, screenshotBuffer, metadata, tree, figmaData] = await Promise.all([
       page.content(),
       page.screenshot({ fullPage: true, type: 'png' }),
       extractMetadata(page),
       buildComponentTree(page),
+      convertPageToFigmaNodes(page).catch((err) => {
+        console.error('[scraper] html-to-figma failed:', err);
+        return null;
+      }),
     ]);
 
     const screenshot = screenshotBuffer.toString('base64');
@@ -146,6 +151,7 @@ export async function scrapePage(url: string): Promise<ScrapeResult> {
       screenshot,
       tree,
       metadata,
+      figmaData: figmaData || undefined,
       createdAt: new Date().toISOString(),
     };
   } finally {

@@ -121,16 +121,8 @@ var __async = (__this, __arguments, generator) => {
     }
     return base;
   };
-  function hexToRgb(hex) {
-    const h = hex.replace("#", "");
-    const r = parseInt(h.substring(0, 2), 16) / 255;
-    const g = parseInt(h.substring(2, 4), 16) / 255;
-    const b = parseInt(h.substring(4, 6), 16) / 255;
-    return { r: isNaN(r) ? 0 : r, g: isNaN(g) ? 0 : g, b: isNaN(b) ? 0 : b };
-  }
-  function loadFont(family, weight) {
+  function loadFont(family, style) {
     return __async(this, null, function* () {
-      const style = weight >= 700 ? "Bold" : weight >= 500 ? "Medium" : weight >= 300 ? "Light" : "Regular";
       const fontName = { family, style };
       try {
         yield figma.loadFontAsync(fontName);
@@ -148,85 +140,170 @@ var __async = (__this, __arguments, generator) => {
       return def;
     });
   }
-  function buildFigmaNode(spec, parent) {
+  function applyPaint(paint) {
+    var _a, _b, _c;
+    if (!paint || !paint.visible) return void 0;
+    if (paint.type === "SOLID" && paint.color) {
+      return {
+        type: "SOLID",
+        color: { r: paint.color.r, g: paint.color.g, b: paint.color.b },
+        opacity: (_b = (_a = paint.opacity) != null ? _a : paint.color.a) != null ? _b : 1
+      };
+    }
+    if (paint.type === "GRADIENT_LINEAR" && paint.gradientStops) {
+      return {
+        type: "GRADIENT_LINEAR",
+        gradientStops: paint.gradientStops.map((s) => {
+          var _a2;
+          return {
+            color: { r: s.color.r, g: s.color.g, b: s.color.b, a: (_a2 = s.color.a) != null ? _a2 : 1 },
+            position: s.position
+          };
+        }),
+        gradientTransform: paint.gradientTransform || [[1, 0, 0], [0, 1, 0]],
+        opacity: (_c = paint.opacity) != null ? _c : 1
+      };
+    }
+    return void 0;
+  }
+  function buildFromHtmlToFigma(node, parent, images) {
     return __async(this, null, function* () {
-      var _a;
-      if (spec.type === "TEXT" && spec.characters) {
+      var _a, _b;
+      if (!node || node.width < 0.5 || node.height < 0.5) return;
+      if (node.type === "TEXT" && node.characters) {
         const text = figma.createText();
-        const font = yield loadFont(spec.fontFamily || "Inter", spec.fontWeight || 400);
+        const fontStyle = node.fontWeight || "Regular";
+        const font = yield loadFont(node.fontFamily || "Inter", fontStyle);
         text.fontName = font;
-        text.characters = spec.characters;
-        text.name = spec.name || "Text";
-        if (spec.fontSize) text.fontSize = spec.fontSize;
-        if (spec.lineHeight && spec.lineHeight > 0) {
-          text.lineHeight = { value: spec.lineHeight, unit: "PIXELS" };
+        text.characters = node.characters;
+        text.name = node.name || "Text";
+        text.x = Math.round(node.x);
+        text.y = Math.round(node.y);
+        text.resize(Math.max(1, node.width), Math.max(1, node.height));
+        if (node.fontSize) text.fontSize = node.fontSize;
+        if (((_a = node.lineHeight) == null ? void 0 : _a.value) && node.lineHeight.value > 0) {
+          text.lineHeight = { value: node.lineHeight.value, unit: "PIXELS" };
         }
-        if (spec.letterSpacing) {
-          text.letterSpacing = { value: spec.letterSpacing, unit: "PIXELS" };
+        if (node.textAlignHorizontal) {
+          const align = node.textAlignHorizontal.toUpperCase();
+          if (align === "CENTER" || align === "RIGHT" || align === "LEFT" || align === "JUSTIFIED") {
+            text.textAlignHorizontal = align;
+          }
         }
-        if (spec.textAlign === "center") text.textAlignHorizontal = "CENTER";
-        else if (spec.textAlign === "right") text.textAlignHorizontal = "RIGHT";
-        if (spec.textColor) {
-          text.fills = [{ type: "SOLID", color: hexToRgb(spec.textColor) }];
+        if (node.color) {
+          const p = applyPaint(node.color);
+          if (p) text.fills = [p];
         }
-        text.textAutoResize = "HEIGHT";
-        text.layoutAlign = "STRETCH";
-        text.layoutGrow = 0;
+        text.textAutoResize = "NONE";
         parent.appendChild(text);
         return;
       }
-      if (spec.type === "IMAGE") {
-        const rect = figma.createRectangle();
-        rect.name = spec.name || "Image";
-        rect.resize(Math.max(1, spec.width), Math.max(1, spec.height));
-        if (spec.imageBase64) {
-          try {
-            const raw = figma.base64Decode(spec.imageBase64);
-            const image = figma.createImage(raw);
-            rect.fills = [{ type: "IMAGE", scaleMode: "FILL", imageHash: image.hash }];
-          } catch (e) {
-            rect.fills = [{ type: "SOLID", color: { r: 0.85, g: 0.85, b: 0.85 } }];
-          }
-        } else {
+      if (node.type === "SVG" && node.svg) {
+        try {
+          const svgNode = figma.createNodeFromSvg(node.svg);
+          svgNode.x = Math.round(node.x);
+          svgNode.y = Math.round(node.y);
+          svgNode.resize(Math.max(1, node.width), Math.max(1, node.height));
+          svgNode.name = node.name || "SVG";
+          parent.appendChild(svgNode);
+        } catch (e) {
+          const rect = figma.createRectangle();
+          rect.x = Math.round(node.x);
+          rect.y = Math.round(node.y);
+          rect.resize(Math.max(1, node.width), Math.max(1, node.height));
           rect.fills = [{ type: "SOLID", color: { r: 0.9, g: 0.9, b: 0.9 } }];
+          parent.appendChild(rect);
         }
-        if (spec.borderRadius && spec.borderRadius > 0) rect.cornerRadius = spec.borderRadius;
-        rect.layoutAlign = "INHERIT";
-        parent.appendChild(rect);
         return;
       }
       const frame = figma.createFrame();
-      frame.name = spec.name || "Frame";
-      frame.resize(Math.max(1, spec.width), Math.max(1, spec.height));
-      if (spec.layoutMode) {
-        frame.layoutMode = spec.layoutMode;
-        frame.itemSpacing = (_a = spec.itemSpacing) != null ? _a : 0;
-        frame.primaryAxisSizingMode = "AUTO";
-        frame.counterAxisSizingMode = "FIXED";
-        if (spec.primaryAxisAlignItems) frame.primaryAxisAlignItems = spec.primaryAxisAlignItems;
-        if (spec.counterAxisAlignItems) frame.counterAxisAlignItems = spec.counterAxisAlignItems;
-      }
-      if (spec.paddingTop) frame.paddingTop = spec.paddingTop;
-      if (spec.paddingRight) frame.paddingRight = spec.paddingRight;
-      if (spec.paddingBottom) frame.paddingBottom = spec.paddingBottom;
-      if (spec.paddingLeft) frame.paddingLeft = spec.paddingLeft;
-      if (spec.backgroundColor) {
-        frame.fills = [{ type: "SOLID", color: hexToRgb(spec.backgroundColor) }];
+      frame.name = node.name || "Frame";
+      frame.x = Math.round(node.x);
+      frame.y = Math.round(node.y);
+      frame.resize(Math.max(1, node.width), Math.max(node.height, 1));
+      frame.clipsContent = (_b = node.clipsContent) != null ? _b : false;
+      if (node.backgroundFill) {
+        const p = applyPaint(node.backgroundFill);
+        if (p) frame.fills = [p];
+        else frame.fills = [];
       } else {
         frame.fills = [];
       }
-      if (spec.borderWidth && spec.borderWidth > 0 && spec.borderColor) {
-        frame.strokes = [{ type: "SOLID", color: hexToRgb(spec.borderColor) }];
-        frame.strokeWeight = spec.borderWidth;
-      }
-      if (spec.borderRadius && spec.borderRadius > 0) frame.cornerRadius = spec.borderRadius;
-      if (spec.opacity != null && spec.opacity < 1) frame.opacity = spec.opacity;
-      frame.layoutAlign = "STRETCH";
-      parent.appendChild(frame);
-      if (spec.children && spec.children.length > 0) {
-        for (const child of spec.children) {
+      if (node.imageUrl) {
+        const base64 = images[node.imageUrl];
+        if (base64) {
           try {
-            yield buildFigmaNode(child, frame);
+            const raw = figma.base64Decode(base64);
+            const image = figma.createImage(raw);
+            frame.fills = [{ type: "IMAGE", scaleMode: "FILL", imageHash: image.hash }];
+          } catch (e) {
+          }
+        }
+      }
+      if (node.topLeftRadius) frame.topLeftRadius = node.topLeftRadius;
+      if (node.topRightRadius) frame.topRightRadius = node.topRightRadius;
+      if (node.bottomLeftRadius) frame.bottomLeftRadius = node.bottomLeftRadius;
+      if (node.bottomRightRadius) frame.bottomRightRadius = node.bottomRightRadius;
+      if (node.strokes && node.strokes.length > 0) {
+        const strokePaints = [];
+        for (const s of node.strokes) {
+          const p = applyPaint(s);
+          if (p && p.type === "SOLID") strokePaints.push(p);
+        }
+        if (strokePaints.length > 0) {
+          frame.strokes = strokePaints;
+          if (node.strokeTopWeight != null) frame.strokeTopWeight = node.strokeTopWeight;
+          if (node.strokeBottomWeight != null) frame.strokeBottomWeight = node.strokeBottomWeight;
+          if (node.strokeLeftWeight != null) frame.strokeLeftWeight = node.strokeLeftWeight;
+          if (node.strokeRightWeight != null) frame.strokeRightWeight = node.strokeRightWeight;
+        }
+      }
+      if (node.dropShadows && node.dropShadows.length > 0) {
+        frame.effects = node.dropShadows.map((ds) => {
+          var _a2;
+          return {
+            type: "DROP_SHADOW",
+            color: { r: ds.colorRgba.r, g: ds.colorRgba.g, b: ds.colorRgba.b, a: (_a2 = ds.colorRgba.a) != null ? _a2 : 0.25 },
+            offset: { x: ds.offsetX || 0, y: ds.offsetY || 0 },
+            radius: ds.radius || 0,
+            spread: ds.spread || 0,
+            visible: true,
+            blendMode: "NORMAL"
+          };
+        });
+      }
+      if (node.effects && node.effects.length > 0) {
+        const existing = frame.effects || [];
+        const blurs = node.effects.filter((e) => e.type === "LAYER_BLUR").map((e) => ({
+          type: "LAYER_BLUR",
+          radius: e.radius,
+          visible: e.visible
+        }));
+        frame.effects = [...existing, ...blurs];
+      }
+      if (node.layoutMode) {
+        frame.layoutMode = node.layoutMode;
+        if (node.itemSpacing != null) frame.itemSpacing = node.itemSpacing;
+        if (node.primaryAxisAlignItems) {
+          frame.primaryAxisAlignItems = node.primaryAxisAlignItems;
+        }
+        if (node.counterAxisAlignItems) {
+          frame.counterAxisAlignItems = node.counterAxisAlignItems;
+        }
+        frame.primaryAxisSizingMode = "AUTO";
+        frame.counterAxisSizingMode = "FIXED";
+      }
+      if (node.padding) {
+        if (node.padding.top) frame.paddingTop = node.padding.top;
+        if (node.padding.right) frame.paddingRight = node.padding.right;
+        if (node.padding.bottom) frame.paddingBottom = node.padding.bottom;
+        if (node.padding.left) frame.paddingLeft = node.padding.left;
+      }
+      parent.appendChild(frame);
+      if (node.children && node.children.length > 0) {
+        for (const child of node.children) {
+          try {
+            yield buildFromHtmlToFigma(child, frame, images);
           } catch (err) {
             console.error(`Failed: ${child.name}`, err);
           }
@@ -236,28 +313,31 @@ var __async = (__this, __arguments, generator) => {
   }
   function createDesignFromSpec(spec) {
     return __async(this, null, function* () {
-      const page = spec.page;
-      if (!page || !page.children) {
-        throw new Error("Invalid spec: missing page.children");
+      const { figmaTree, pageInfo, images = {} } = spec;
+      if (!figmaTree) {
+        throw new Error("Invalid spec: missing figmaTree");
       }
       const pageFrame = figma.createFrame();
-      pageFrame.name = page.name || "Cloned Page";
-      pageFrame.resize(Math.max(1, page.width), Math.max(1, page.height));
+      pageFrame.name = pageInfo.name || "Cloned Page";
+      pageFrame.resize(Math.max(1, pageInfo.width), Math.max(1, pageInfo.height));
       pageFrame.x = 0;
       pageFrame.y = 0;
       pageFrame.clipsContent = true;
-      pageFrame.layoutMode = "VERTICAL";
-      pageFrame.primaryAxisSizingMode = "AUTO";
-      pageFrame.counterAxisSizingMode = "FIXED";
-      pageFrame.itemSpacing = 0;
       pageFrame.fills = [{ type: "SOLID", color: { r: 1, g: 1, b: 1 } }];
       figma.currentPage.appendChild(pageFrame);
-      for (const child of page.children) {
-        try {
-          yield buildFigmaNode(child, pageFrame);
-        } catch (err) {
-          console.error(`Failed: ${child.name}`, err);
+      const tree = figmaTree;
+      if (tree.children) {
+        for (const child of tree.children) {
+          try {
+            yield buildFromHtmlToFigma(child, pageFrame, images);
+          } catch (err) {
+            console.error(`Failed:`, err);
+          }
         }
+      }
+      if (tree.backgroundFill) {
+        const p = applyPaint(tree.backgroundFill);
+        if (p) pageFrame.fills = [p];
       }
       figma.viewport.scrollAndZoomIntoView([pageFrame]);
       return [pageFrame.id];
@@ -513,8 +593,8 @@ var __async = (__this, __arguments, generator) => {
         }
         case "create_design": {
           const spec = request.params;
-          if (!spec || !spec.page || !spec.page.children) {
-            throw new Error("Invalid design spec: missing page.children");
+          if (!spec || !spec.figmaTree) {
+            throw new Error("Invalid design spec: missing figmaTree");
           }
           const createdIds = yield createDesignFromSpec(spec);
           return {
