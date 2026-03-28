@@ -7,9 +7,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Copy } from 'lucide-react';
-import { toast } from 'sonner';
 
 interface FigmaInstructionsProps {
   open: boolean;
@@ -17,73 +14,49 @@ interface FigmaInstructionsProps {
   url: string;
 }
 
-const PROMPT_TEMPLATE = `I have a JSON design spec exported from SiteCloner for the website: {URL}
-
-The JSON file is attached / pasted below. Please create a Figma design based on this spec:
-
-1. Create a new Figma page with the specified dimensions
-2. For each frame in the spec, create a Figma frame with:
-   - Exact position (x, y) and size (width, height)
-   - Auto Layout where layoutMode is specified
-   - Fill colors from the "fills" property
-   - Corner radius and strokes where specified
-3. For TEXT nodes, create text layers with the specified font, size, weight, and color
-4. Apply the design tokens (colors, typography, spacing) as Figma styles
-5. Name each frame according to the "name" property
-
-Use the Figma MCP tools to read and verify the result after creation.`;
-
-export function FigmaInstructions({ open, onOpenChange, url }: FigmaInstructionsProps) {
-  const prompt = PROMPT_TEMPLATE.replace('{URL}', url);
-
-  function copyPrompt() {
-    navigator.clipboard.writeText(prompt);
-    toast.success('Prompt copied to clipboard');
-  }
-
+export function FigmaInstructions({ open, onOpenChange }: FigmaInstructionsProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Export to Figma</DialogTitle>
+          <DialogTitle>Figma Bridge Setup</DialogTitle>
           <DialogDescription>
-            Follow these steps to create a Figma design from your clone
+            One-time setup to enable direct export to Figma
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 text-sm">
           <div className="space-y-3">
             <Step n={1}>
-              <strong>Download the JSON</strong> using the &quot;Download JSON&quot; button
-              or copy it to clipboard.
+              <strong>Build the bridge server</strong>: open a terminal in{' '}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">figma-mcp-bridge-main/server</code>{' '}
+              and run <code className="rounded bg-muted px-1 py-0.5 text-xs">npm install && npm run build</code>,{' '}
+              then <code className="rounded bg-muted px-1 py-0.5 text-xs">node dist/index.js</code>
             </Step>
             <Step n={2}>
-              Open <strong>Claude Code</strong> with Figma MCP configured.
-              Make sure the Figma MCP server is connected.
+              <strong>Build the Figma plugin</strong>: in{' '}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">figma-mcp-bridge-main/plugin</code>{' '}
+              run <code className="rounded bg-muted px-1 py-0.5 text-xs">npm install && npm run build</code>
             </Step>
             <Step n={3}>
-              Paste the prompt below along with the JSON data.
-              Claude will use the Figma Plugin API to create frames,
-              apply styles, and build the layout.
+              <strong>Install plugin in Figma</strong>: In Figma, go to{' '}
+              <em>Plugins &rarr; Development &rarr; Import plugin from manifest</em>,{' '}
+              select <code className="rounded bg-muted px-1 py-0.5 text-xs">plugin/manifest.json</code>
             </Step>
             <Step n={4}>
-              Review and edit the design in Figma.
-              When ready, use &quot;Generate Code&quot; to export to your framework.
+              <strong>Run the plugin</strong>: Open your Figma file, run the MCP Bridge plugin.
+              It should show &quot;Connected&quot; status.
+            </Step>
+            <Step n={5}>
+              <strong>Click &quot;Send to Figma&quot;</strong> in SiteCloner — the design will be
+              created directly in your open Figma file.
             </Step>
           </div>
 
-          <div className="relative">
-            <pre className="rounded-lg border border-border bg-muted/50 p-3 text-xs leading-relaxed whitespace-pre-wrap max-h-48 overflow-auto">
-              {prompt}
-            </pre>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute right-2 top-2 h-7 w-7"
-              onClick={copyPrompt}
-            >
-              <Copy className="h-3.5 w-3.5" />
-            </Button>
+          <div className="rounded-lg border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
+            The bridge runs on <strong>localhost:1994</strong>. The green indicator next to
+            &quot;Export to Figma&quot; shows the connection status. Keep the plugin running
+            in Figma while exporting.
           </div>
         </div>
       </DialogContent>

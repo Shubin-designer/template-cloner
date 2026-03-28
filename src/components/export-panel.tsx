@@ -1,68 +1,102 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { ScrapeResult } from '@/types/clone';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { FigmaInstructions } from './figma-instructions';
-import { Palette, Copy, Download, Loader2, Code2 } from 'lucide-react';
+import { Palette, Copy, Download, Code2, Send, Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import type { FigmaDesignSpec } from '@/lib/export/figma-json';
+import { generateFigmaDesignSpec } from '@/lib/export/figma-json';
+
+const BRIDGE_URL = 'http://localhost:1994';
 
 interface ExportPanelProps {
   data: ScrapeResult;
 }
 
 export function ExportPanel({ data }: ExportPanelProps) {
-  const [figmaSpec, setFigmaSpec] = useState<FigmaDesignSpec | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [showInstructions, setShowInstructions] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [bridgeStatus, setBridgeStatus] = useState<'unknown' | 'connected' | 'disconnected'>('unknown');
 
-  async function generateSpec() {
-    if (figmaSpec) return figmaSpec;
+  const figmaSpec = useMemo(
+    () => generateFigmaDesignSpec(data.tree, data.metadata, data.url, data.createdAt),
+    [data]
+  );
 
-    setLoading(true);
+  const specJson = useMemo(() => JSON.stringify(figmaSpec, null, 2), [figmaSpec]);
+
+  async function checkBridge(): Promise<boolean> {
     try {
-      const res = await fetch('/api/export/figma', {
+      const res = await fetch(`${BRIDGE_URL}/ping`, { signal: AbortSignal.timeout(3000) });
+      if (res.ok) {
+        setBridgeStatus('connected');
+        return true;
+      }
+    } catch {
+      // bridge not running
+    }
+    setBridgeStatus('disconnected');
+    return false;
+  }
+
+  async function handleSendToFigma() {
+    setSending(true);
+
+    const alive = await checkBridge();
+    if (!alive) {
+      toast.error('Figma Bridge not running', {
+        description: 'Start the Figma MCP Bridge plugin and server first.',
+      });
+      setSending(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${BRIDGE_URL}/api/create-design`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tree: data.tree,
-          metadata: data.metadata,
-          url: data.url,
-          createdAt: data.createdAt,
-        }),
+        body: JSON.stringify(figmaSpec),
       });
 
-      if (!res.ok) {
-        toast.error('Failed to generate Figma spec');
-        return null;
-      }
+      const result = await res.json();
 
-      const spec = await res.json();
-      setFigmaSpec(spec);
-      return spec;
-    } catch {
-      toast.error('Network error');
-      return null;
+      if (result.error) {
+        toast.error('Failed to create design', { description: result.error });
+      } else {
+        toast.success('Design created in Figma!', {
+          description: `Created ${result.data?.createdNodeIds?.length || 0} frame(s). Check your Figma file.`,
+        });
+      }
+    } catch (error) {
+      toast.error('Connection error', {
+        description: 'Could not reach the Figma Bridge server.',
+      });
+      console.error('Send to Figma error:', error);
     } finally {
-      setLoading(false);
+      setSending(false);
     }
   }
 
-  async function handleCopy() {
-    const spec = await generateSpec();
-    if (!spec) return;
-
-    await navigator.clipboard.writeText(JSON.stringify(spec, null, 2));
-    toast.success('JSON copied to clipboard');
+  function handleCopy() {
+    navigator.clipboard.writeText(specJson).then(
+      () => toast.success('JSON copied to clipboard'),
+      () => {
+        const textarea = document.createElement('textarea');
+        textarea.value = specJson;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        toast.success('JSON copied to clipboard');
+      }
+    );
   }
 
-  async function handleDownload() {
-    const spec = await generateSpec();
-    if (!spec) return;
-
-    const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
+  function handleDownload() {
+    const blob = new Blob([specJson], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -70,11 +104,6 @@ export function ExportPanel({ data }: ExportPanelProps) {
     a.click();
     URL.revokeObjectURL(url);
     toast.success('JSON downloaded');
-  }
-
-  async function handleInstructions() {
-    await generateSpec();
-    setShowInstructions(true);
   }
 
   return (
@@ -86,38 +115,37 @@ export function ExportPanel({ data }: ExportPanelProps) {
             <CardTitle className="flex items-center gap-2 text-base">
               <Palette className="h-4 w-4" />
               Export to Figma
+              {bridgeStatus === 'connected' && <CheckCircle className="h-3.5 w-3.5 text-green-500" />}
+              {bridgeStatus === 'disconnected' && <XCircle className="h-3.5 w-3.5 text-red-500" />}
             </CardTitle>
             <CardDescription className="text-xs">
-              Generate a design spec for Claude Code + Figma MCP
+              Send directly to Figma via MCP Bridge
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             <Button
-              variant="outline"
               size="sm"
-              onClick={handleCopy}
-              disabled={loading}
+              onClick={handleSendToFigma}
+              disabled={sending}
             >
-              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
-              <span className="ml-1.5">Copy JSON</span>
+              {sending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Send className="h-3.5 w-3.5" />
+              )}
+              <span className="ml-1.5">{sending ? 'Sending...' : 'Send to Figma'}</span>
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleDownload}
-              disabled={loading}
-            >
-              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-              <span className="ml-1.5">Download JSON</span>
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleInstructions}
-              disabled={loading}
-            >
-              <Palette className="h-3.5 w-3.5" />
-              <span className="ml-1.5">View Instructions</span>
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="flex-1" onClick={handleCopy}>
+                <Copy className="h-3.5 w-3.5" />
+                <span className="ml-1.5">Copy JSON</span>
+              </Button>
+              <Button variant="outline" size="sm" className="flex-1" onClick={handleDownload}>
+                <Download className="h-3.5 w-3.5" />
+                <span className="ml-1.5">Download</span>
+              </Button>
+            </div>
+            <FigmaInstructionsButton url={data.url} />
           </CardContent>
         </Card>
 
@@ -140,12 +168,19 @@ export function ExportPanel({ data }: ExportPanelProps) {
           </CardContent>
         </Card>
       </div>
+    </>
+  );
+}
 
-      <FigmaInstructions
-        open={showInstructions}
-        onOpenChange={setShowInstructions}
-        url={data.url}
-      />
+function FigmaInstructionsButton({ url }: { url: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
+        <Palette className="h-3.5 w-3.5" />
+        <span className="ml-1.5">Setup Instructions</span>
+      </Button>
+      <FigmaInstructions open={open} onOpenChange={setOpen} url={url} />
     </>
   );
 }
