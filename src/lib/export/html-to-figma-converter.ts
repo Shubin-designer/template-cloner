@@ -5,10 +5,6 @@ import path from 'path';
 /**
  * Use @magicpatterns/html-to-figma to convert the live DOM
  * directly into Figma-compatible node data.
- *
- * This runs the library inside Playwright's browser context,
- * giving it access to getComputedStyle, getBoundingClientRect, etc.
- * The output maps directly to Figma Plugin API node types.
  */
 export async function convertPageToFigmaNodes(page: Page): Promise<FigmaPageData> {
   // Read the UMD bundle
@@ -18,13 +14,34 @@ export async function convertPageToFigmaNodes(page: Page): Promise<FigmaPageData
   );
   const bundleCode = fs.readFileSync(bundlePath, 'utf8');
 
-  // Inject the library into the page
-  await page.evaluate(bundleCode);
+  // Inject via addScriptTag to ensure it runs in proper browser context
+  await page.addScriptTag({ content: bundleCode });
 
-  // Run the conversion
+  // Run the conversion and strip non-serializable metadata
   const rawData = await page.evaluate(() => {
-    // @ts-expect-error - htmlToFigma is injected globally by the UMD bundle
-    const result = htmlToFigma.htmlToFigma(document.body);
+    // The UMD bundle exposes htmlToFigma on globalThis
+    // @ts-expect-error - injected by UMD bundle
+    const lib = globalThis.htmlToFigma || window.htmlToFigma;
+    if (!lib || !lib.htmlToFigma) {
+      throw new Error('html-to-figma library not loaded');
+    }
+
+    const result = lib.htmlToFigma(document.body);
+
+    // Strip metadata.node (DOM references — not serializable)
+    function strip(node: Record<string, unknown>): void {
+      if (node.metadata) {
+        const meta = node.metadata as Record<string, unknown>;
+        delete meta.node;
+      }
+      if (Array.isArray(node.children)) {
+        for (const child of node.children) {
+          strip(child as Record<string, unknown>);
+        }
+      }
+    }
+    strip(result);
+
     return result;
   });
 
@@ -47,5 +64,5 @@ export interface FigmaPageData {
   name: string;
   width: number;
   height: number;
-  tree: unknown; // Raw html-to-figma output — passed directly to plugin
+  tree: unknown;
 }

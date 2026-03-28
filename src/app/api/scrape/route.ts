@@ -106,6 +106,7 @@ export async function POST(request: NextRequest) {
       html: result.html,
       tree: result.tree,
       metadata: result.metadata,
+      figmaData: result.figmaData,
       createdAt: result.createdAt,
     });
   } catch (error) {
