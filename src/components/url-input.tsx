@@ -75,9 +75,14 @@ export function UrlInput() {
         toast.info('Sending to Figma...', { description: 'Creating frames and layout...' });
 
         try {
+          const figmaTree = data.figmaData?.tree || data.figmaData || data.tree;
           const payload = {
-            figmaTree: data.figmaData || data.tree,
-            pageInfo: { name: data.metadata.title || 'Cloned Page', width: 1440, height: 3000 },
+            figmaTree,
+            pageInfo: {
+              name: data.figmaData?.name || data.metadata.title || 'Cloned Page',
+              width: data.figmaData?.width || 1440,
+              height: data.figmaData?.height || 3000,
+            },
             sourceUrl: data.url,
           };
 
