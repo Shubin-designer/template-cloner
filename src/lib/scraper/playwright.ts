@@ -130,17 +130,19 @@ export async function scrapePage(url: string): Promise<ScrapeResult> {
     // Wait for all animations to complete
     await page.waitForTimeout(1500);
 
-    // Extract data in parallel
-    const [html, screenshotBuffer, metadata, tree, figmaData] = await Promise.all([
-      page.content(),
-      page.screenshot({ fullPage: true, type: 'png' }),
-      extractMetadata(page),
-      buildComponentTree(page),
-      convertPageToFigmaNodes(page).catch((err) => {
-        console.error('[scraper] html-to-figma failed:', err);
-        return null;
-      }),
-    ]);
+    // Extract basic data
+    const html = await page.content();
+    const screenshotBuffer = await page.screenshot({ fullPage: true, type: 'png' });
+    const metadata = await extractMetadata(page);
+    const tree = await buildComponentTree(page);
+
+    // Run html-to-figma AFTER everything else (it injects scripts and modifies styles)
+    let figmaData = null;
+    try {
+      figmaData = await convertPageToFigmaNodes(page);
+    } catch (err) {
+      console.error('[scraper] html-to-figma failed:', err);
+    }
 
     const screenshot = screenshotBuffer.toString('base64');
 
