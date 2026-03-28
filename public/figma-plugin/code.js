@@ -185,9 +185,8 @@ var __async = (__this, __arguments, generator) => {
       }
       const frame = figma.createFrame();
       frame.name = spec.name || "Frame";
-      frame.x = Math.round(spec.x);
-      frame.y = Math.round(spec.y);
       frame.resize(Math.max(1, spec.width), Math.max(1, spec.height));
+      frame.layoutAlign = "STRETCH";
       if (spec.layoutMode === "HORIZONTAL" || spec.layoutMode === "VERTICAL") {
         frame.layoutMode = spec.layoutMode;
         frame.primaryAxisSizingMode = "FIXED";
@@ -243,6 +242,10 @@ var __async = (__this, __arguments, generator) => {
         pageFrame.resize(Math.max(1, pageSpec.width), Math.max(1, pageSpec.height));
         pageFrame.x = 0;
         pageFrame.y = 0;
+        pageFrame.layoutMode = "VERTICAL";
+        pageFrame.primaryAxisSizingMode = "AUTO";
+        pageFrame.counterAxisSizingMode = "FIXED";
+        pageFrame.itemSpacing = 0;
         if (pageSpec.backgroundColor) {
           pageFrame.fills = [{
             type: "SOLID",

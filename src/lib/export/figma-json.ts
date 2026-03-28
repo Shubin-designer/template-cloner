@@ -174,26 +174,73 @@ function mapCounterAlign(value: string | undefined): 'MIN' | 'CENTER' | 'MAX' {
 
 // --- Core conversion ---
 
+/**
+ * Determine the best layout mode for a node.
+ * In Figma, Auto Layout handles child positioning — no absolute coords needed.
+ * If CSS has flex, use that direction. Otherwise default to VERTICAL for containers.
+ */
+function inferLayoutMode(node: ComponentNode): 'HORIZONTAL' | 'VERTICAL' | 'NONE' {
+  const s = node.styles;
+  if (s.display === 'flex' || s.display === 'inline-flex') {
+    return s.flexDirection === 'column' ? 'VERTICAL' : 'HORIZONTAL';
+  }
+  if (s.display === 'grid') return 'HORIZONTAL'; // simplified grid → row
+  // Block-level containers with children → vertical stack
+  if (node.children.length > 0) return 'VERTICAL';
+  return 'NONE';
+}
+
+/**
+ * Estimate spacing between children by looking at their rects.
+ */
+function estimateGap(children: ComponentNode[], direction: 'HORIZONTAL' | 'VERTICAL'): number {
+  if (children.length < 2) return 0;
+
+  const gaps: number[] = [];
+  for (let i = 1; i < children.length; i++) {
+    const prev = children[i - 1].rect;
+    const curr = children[i].rect;
+    if (!prev || !curr) continue;
+
+    const gap = direction === 'VERTICAL'
+      ? curr.y - (prev.y + prev.height)
+      : curr.x - (prev.x + prev.width);
+
+    if (gap > 0 && gap < 200) gaps.push(Math.round(gap));
+  }
+
+  if (gaps.length === 0) return 0;
+  // Use median gap
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)];
+}
+
 function nodeToFigmaFrame(node: ComponentNode): FigmaFrameSpec {
   const styles = node.styles;
   const padding = parsePadding(styles.padding);
-  const layoutMode = mapLayoutMode(styles);
+  const isText = node.textContent && node.children.length === 0 && node.tag !== 'img';
+  const isImage = node.tag === 'img';
 
   const frame: FigmaFrameSpec = {
     name: `${node.type}/${node.tag}${node.className ? '.' + node.className.split(' ')[0] : ''}`,
-    type: node.tag === 'img' ? 'IMAGE' : (node.textContent && node.children.length === 0) ? 'TEXT' : 'FRAME',
-    x: node.rect?.x ?? 0,
-    y: node.rect?.y ?? 0,
-    width: node.rect?.width ?? parseSize(styles.width),
-    height: node.rect?.height ?? parseSize(styles.height),
+    type: isImage ? 'IMAGE' : isText ? 'TEXT' : 'FRAME',
+    // Children inside Auto Layout don't need x/y — Figma positions them automatically.
+    // We set 0,0 here; the parent's Auto Layout handles placement.
+    x: 0,
+    y: 0,
+    width: Math.max(1, (node.rect?.width ?? parseSize(styles.width)) || 100),
+    height: Math.max(1, (node.rect?.height ?? parseSize(styles.height)) || 40),
   };
 
-  // Layout
-  if (layoutMode !== 'NONE') {
-    frame.layoutMode = layoutMode;
-    frame.itemSpacing = parseSize(styles.gap);
-    frame.primaryAxisAlignItems = mapAlign(styles.justifyContent);
-    frame.counterAxisAlignItems = mapCounterAlign(styles.alignItems);
+  // Auto Layout for containers
+  if (frame.type === 'FRAME' && node.children.length > 0) {
+    const layoutMode = inferLayoutMode(node);
+    if (layoutMode !== 'NONE') {
+      frame.layoutMode = layoutMode;
+      frame.itemSpacing = parseSize(styles.gap) || estimateGap(node.children, layoutMode);
+      frame.primaryAxisAlignItems = mapAlign(styles.justifyContent);
+      frame.counterAxisAlignItems = mapCounterAlign(styles.alignItems);
+    }
   }
 
   // Padding
@@ -253,7 +300,7 @@ function nodeToFigmaFrame(node: ComponentNode): FigmaFrameSpec {
     frame.imageUrl = node.attributes.src;
   }
 
-  // Children
+  // Children — recurse
   if (node.children.length > 0) {
     frame.children = node.children.map(nodeToFigmaFrame);
   }
@@ -336,17 +383,15 @@ export function generateFigmaDesignSpec(
   scrapedAt: string
 ): FigmaDesignSpec {
   const designTokens = extractDesignTokens(tree);
-  const frames = tree.map(nodeToFigmaFrame);
+  const sectionFrames = tree.map(nodeToFigmaFrame);
 
-  // Calculate page dimensions from all frames
-  let maxWidth = 1440;
-  let maxHeight = 900;
-  for (const frame of frames) {
-    const right = frame.x + frame.width;
-    const bottom = frame.y + frame.height;
-    if (right > maxWidth) maxWidth = right;
-    if (bottom > maxHeight) maxHeight = bottom;
+  // Each section gets full page width
+  for (const frame of sectionFrames) {
+    frame.width = 1440;
   }
+
+  // Total height = sum of all sections
+  const totalHeight = sectionFrames.reduce((sum, f) => sum + f.height, 0);
 
   return {
     version: '1.0',
@@ -359,9 +404,9 @@ export function generateFigmaDesignSpec(
     pages: [
       {
         name: metadata.title || 'Home',
-        width: Math.round(maxWidth),
-        height: Math.round(maxHeight),
-        children: frames,
+        width: 1440,
+        height: Math.max(900, Math.round(totalHeight)),
+        children: sectionFrames,
       },
     ],
   };

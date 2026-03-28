@@ -43,6 +43,7 @@ describe('generateFigmaDesignSpec', () => {
   it('converts nodes to Figma frames', () => {
     const nodes = [
       makeNode({
+        children: [makeNode({ id: 'child-1', tag: 'div', depth: 1 })],
         styles: {
           display: 'flex',
           flexDirection: 'column',
@@ -160,6 +161,7 @@ describe('generateFigmaDesignSpec', () => {
   it('maps flex-direction row to HORIZONTAL', () => {
     const nodes = [
       makeNode({
+        children: [makeNode({ id: 'child-1', tag: 'span', depth: 1 })],
         styles: { display: 'flex' },
       }),
     ];
