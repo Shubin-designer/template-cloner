@@ -168,7 +168,7 @@ var __async = (__this, __arguments, generator) => {
   }
   function buildFromHtmlToFigma(node, parent, images) {
     return __async(this, null, function* () {
-      var _a, _b;
+      var _a;
       if (!node || node.width < 0.5 || node.height < 0.5) return;
       if (node.type === "TEXT" && node.characters) {
         const text = figma.createText();
@@ -221,7 +221,7 @@ var __async = (__this, __arguments, generator) => {
       frame.x = Math.round(node.x);
       frame.y = Math.round(node.y);
       frame.resize(Math.max(1, node.width), Math.max(node.height, 1));
-      frame.clipsContent = (_b = node.clipsContent) != null ? _b : false;
+      frame.clipsContent = node.clipsContent !== false;
       if (node.backgroundFill) {
         const p = applyPaint(node.backgroundFill);
         if (p) frame.fills = [p];

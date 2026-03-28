@@ -52,11 +52,17 @@ export async function convertPageToFigmaNodes(page: Page): Promise<FigmaPageData
       if (!rgba || rgba === 'rgba(0, 0, 0, 0)' || rgba === 'transparent') return null;
       const m = rgba.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)/);
       if (!m) return null;
-      const r = parseInt(m[1]) / 255;
-      const g = parseInt(m[2]) / 255;
-      const b = parseInt(m[3]) / 255;
+      const ri = parseInt(m[1]);
+      const gi = parseInt(m[2]);
+      const bi = parseInt(m[3]);
       const a = m[4] !== undefined ? parseFloat(m[4]) : 1;
       if (a === 0) return null;
+      // Skip pure black and pure white — these are usually defaults, not real backgrounds
+      if (ri === 0 && gi === 0 && bi === 0) return null;
+      if (ri === 255 && gi === 255 && bi === 255) return null;
+      const r = ri / 255;
+      const g = gi / 255;
+      const b = bi / 255;
       return { type: 'SOLID', color: { r, g, b }, opacity: a, visible: true, blendMode: 'NORMAL' };
     }
 
