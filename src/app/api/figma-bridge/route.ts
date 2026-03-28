@@ -59,15 +59,17 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function collectImageUrlsFromTree(node: Record<string, unknown>): string[] {
+function collectImageUrlsFromTree(node: unknown): string[] {
   const urls: string[] = [];
-  function walk(n: Record<string, unknown>) {
-    if (n.imageUrl && typeof n.imageUrl === 'string') {
-      urls.push(n.imageUrl);
+  function walk(n: unknown) {
+    if (!n || typeof n !== 'object') return;
+    const obj = n as Record<string, unknown>;
+    if (obj.imageUrl && typeof obj.imageUrl === 'string') {
+      urls.push(obj.imageUrl);
     }
-    if (Array.isArray(n.children)) {
-      for (const child of n.children) {
-        walk(child as Record<string, unknown>);
+    if (Array.isArray(obj.children)) {
+      for (const child of obj.children) {
+        walk(child);
       }
     }
   }
