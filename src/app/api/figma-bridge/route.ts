@@ -7,14 +7,10 @@ export async function GET() {
   try {
     const bridge = await ensureBridgeRunning();
     const connected = await bridge.checkPluginConnected();
-    return NextResponse.json({
-      status: 'ok',
-      pluginConnected: connected,
-    });
+    return NextResponse.json({ status: 'ok', pluginConnected: connected });
   } catch (error) {
     return NextResponse.json({
-      status: 'error',
-      pluginConnected: false,
+      status: 'error', pluginConnected: false,
       error: error instanceof Error ? error.message : String(error),
     });
   }
@@ -23,7 +19,6 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const bridge = await ensureBridgeRunning();
-
     const connected = await bridge.checkPluginConnected();
     if (!connected) {
       return NextResponse.json({
@@ -33,39 +28,25 @@ export async function POST(request: NextRequest) {
 
     const spec = await request.json();
 
-    // Support both v2 (spec.page) and v1 (spec.pages) formats
-    const page = spec.page || (spec.pages && spec.pages[0]);
-    const elements = page?.elements || page?.children;
-
-    if (!page || !elements) {
-      console.error('[figma-bridge] Invalid spec keys:', Object.keys(spec));
-      return NextResponse.json({
-        error: `Invalid design spec. Got keys: ${Object.keys(spec).join(', ')}`,
-      }, { status: 400 });
-    }
-
-    // Normalize to v2 format
-    if (!spec.page) {
-      spec.page = { ...page, elements: elements };
-    }
-    if (!spec.page.elements && spec.page.children) {
-      spec.page.elements = spec.page.children;
+    // v3 format: spec.page.children
+    const children = spec.page?.children;
+    if (!children || !Array.isArray(children)) {
+      console.error('[figma-bridge] Invalid spec. Keys:', Object.keys(spec), 'page keys:', spec.page ? Object.keys(spec.page) : 'none');
+      return NextResponse.json({ error: 'Invalid design spec: missing page.children' }, { status: 400 });
     }
 
     // Pre-fetch images
     const sourceUrl = spec.source?.url || '';
-    const imageUrls = collectImageUrls(spec.page.elements);
+    const imageUrls = collectImageUrls(children);
     if (imageUrls.length > 0) {
       const imageMap = await fetchImagesAsBase64(imageUrls, sourceUrl);
-      injectImageBase64(spec.page.elements, imageMap);
+      injectImageBase64(children, imageMap);
     }
 
     const result = await bridge.createDesign(spec);
-
     if (result.error) {
       return NextResponse.json({ error: result.error }, { status: 500 });
     }
-
     return NextResponse.json({ data: result.data });
   } catch (error) {
     console.error('[figma-bridge] Error:', error);

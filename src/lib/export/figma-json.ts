@@ -4,53 +4,60 @@ import type { PageMetadata } from '@/types/clone';
 // --- Types ---
 
 export interface FigmaDesignSpec {
-  version: '2.0';
-  source: {
-    url: string;
-    title: string;
-    scrapedAt: string;
-  };
+  version: '3.0';
+  source: { url: string; title: string; scrapedAt: string };
   page: {
     name: string;
     width: number;
     height: number;
-    backgroundColor?: string;
-    elements: FigmaElement[];
+    children: FigmaNode[];
   };
 }
 
-export interface FigmaElement {
+export interface FigmaNode {
   name: string;
   type: 'FRAME' | 'TEXT' | 'IMAGE';
-  // Absolute position relative to page top-left
-  x: number;
-  y: number;
   width: number;
   height: number;
+  // Layout (for FRAME with children)
+  layoutMode?: 'HORIZONTAL' | 'VERTICAL';
+  itemSpacing?: number;
+  paddingTop?: number;
+  paddingRight?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
+  primaryAxisAlignItems?: 'MIN' | 'CENTER' | 'MAX' | 'SPACE_BETWEEN';
+  counterAxisAlignItems?: 'MIN' | 'CENTER' | 'MAX';
+  // Sizing in parent's auto layout
+  layoutSizingHorizontal?: 'FILL' | 'HUG' | 'FIXED';
+  layoutSizingVertical?: 'FILL' | 'HUG' | 'FIXED';
   // Visual
-  backgroundColor?: string; // hex
+  backgroundColor?: string;
   borderRadius?: number;
   borderWidth?: number;
-  borderColor?: string; // hex
+  borderColor?: string;
   opacity?: number;
-  // Text (only for TEXT type)
+  boxShadow?: string;
+  // Text
   characters?: string;
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: number;
   lineHeight?: number;
   letterSpacing?: number;
-  textColor?: string; // hex
+  textColor?: string;
   textAlign?: string;
-  // Image (only for IMAGE type)
+  // Image
   imageUrl?: string;
   imageBase64?: string;
+  // Children
+  children?: FigmaNode[];
 }
 
 // --- Helpers ---
 
 function toHex(color: string | undefined): string | null {
-  if (!color || color === 'transparent' || color === 'none' || color === '') return null;
+  if (!color || color === '' || color === 'transparent' || color === 'none') return null;
   if (/^#[0-9a-fA-F]{3,8}$/.test(color)) {
     const h = color.replace('#', '');
     if (h.length === 3) return `#${h[0]}${h[0]}${h[1]}${h[1]}${h[2]}${h[2]}`;
@@ -66,115 +73,164 @@ function toHex(color: string | undefined): string | null {
   return null;
 }
 
-function parseSize(value: string | undefined): number {
+function px(value: string | undefined): number {
   if (!value) return 0;
-  const num = parseFloat(value);
-  return isNaN(num) ? 0 : Math.round(num);
+  const n = parseFloat(value);
+  return isNaN(n) ? 0 : Math.round(n);
 }
 
-// --- Flatten tree to absolute-positioned elements ---
+function mapAlign(v: string | undefined): 'MIN' | 'CENTER' | 'MAX' | 'SPACE_BETWEEN' {
+  if (v === 'center') return 'CENTER';
+  if (v === 'flex-end' || v === 'end') return 'MAX';
+  if (v === 'space-between') return 'SPACE_BETWEEN';
+  return 'MIN';
+}
 
-function flattenNode(
-  node: ComponentNode,
-  elements: FigmaElement[],
-  pageOffsetY: number
-): void {
-  if (!node.rect || node.rect.width < 1 || node.rect.height < 1) return;
+function mapCrossAlign(v: string | undefined): 'MIN' | 'CENTER' | 'MAX' {
+  if (v === 'center') return 'CENTER';
+  if (v === 'flex-end' || v === 'end') return 'MAX';
+  return 'MIN';
+}
 
-  const styles = node.styles;
-  const isImg = node.tag === 'img';
-  const isTextLeaf = !!(node.textContent && node.children.length === 0 && !isImg);
+// --- Convert ComponentNode → FigmaNode (recursive, keeps hierarchy) ---
 
-  const bgColor = toHex(styles.backgroundColor);
-  const borderWidth = parseSize(styles.borderWidth);
-  const borderColor = toHex(styles.borderColor);
-  const borderRadius = parseSize(styles.borderRadius);
-  const opacity = styles.opacity ? parseFloat(styles.opacity) : undefined;
+function convertNode(node: ComponentNode): FigmaNode {
+  const s = node.styles;
+  const isImg = node.tag === 'img' || node.tag === 'svg';
+  const isText = !!(node.textContent && node.children.length === 0 && !isImg);
+  const hasChildren = node.children.length > 0;
 
-  // Determine element type
-  let type: FigmaElement['type'] = 'FRAME';
-  if (isImg) type = 'IMAGE';
-  else if (isTextLeaf) type = 'TEXT';
+  const w = Math.max(1, node.rect?.width || px(s.width) || 100);
+  const h = Math.max(1, node.rect?.height || px(s.height) || 20);
 
-  const element: FigmaElement = {
+  const figNode: FigmaNode = {
     name: `${node.type}/${node.tag}${node.className ? '.' + node.className.split(/\s+/)[0] : ''}`,
-    type,
-    x: Math.round(node.rect.x),
-    y: Math.round(node.rect.y - pageOffsetY),
-    width: Math.round(node.rect.width),
-    height: Math.round(node.rect.height),
+    type: isImg ? 'IMAGE' : isText ? 'TEXT' : 'FRAME',
+    width: w,
+    height: h,
+    // Default: fill parent width, hug height
+    layoutSizingHorizontal: 'FILL',
+    layoutSizingVertical: 'HUG',
   };
 
-  // Background
-  if (bgColor) element.backgroundColor = bgColor;
+  // --- Layout (Auto Layout) ---
+  if (figNode.type === 'FRAME') {
+    const isFlex = s.display === 'flex' || s.display === 'inline-flex';
+    const isGrid = s.display === 'grid' || s.display === 'inline-grid';
 
-  // Border
-  if (borderWidth > 0 && borderColor) {
-    element.borderWidth = borderWidth;
-    element.borderColor = borderColor;
-  }
-  if (borderRadius > 0) element.borderRadius = borderRadius;
+    if (isFlex || isGrid || hasChildren) {
+      // Determine direction
+      if (isFlex && s.flexDirection === 'row') {
+        figNode.layoutMode = 'HORIZONTAL';
+      } else if (isGrid) {
+        // Approximate grid as horizontal (most common for card grids)
+        figNode.layoutMode = 'HORIZONTAL';
+      } else {
+        // Default: vertical stack (block flow)
+        figNode.layoutMode = 'VERTICAL';
+      }
 
-  // Opacity
-  if (opacity != null && opacity < 1 && !isNaN(opacity)) element.opacity = opacity;
-
-  // Text
-  if (type === 'TEXT' && node.textContent) {
-    element.characters = node.textContent;
-    element.fontFamily = styles.fontFamily?.split(',')[0]?.replace(/['"]/g, '').trim() || 'Inter';
-    element.fontSize = parseSize(styles.fontSize) || 16;
-    element.fontWeight = styles.fontWeight ? parseInt(styles.fontWeight, 10) || 400 : 400;
-    element.textColor = toHex(styles.color) || '#000000';
-    if (styles.lineHeight) {
-      const lh = parseSize(styles.lineHeight);
-      if (lh > 0) element.lineHeight = lh;
+      figNode.itemSpacing = px(s.gap) || 0;
+      figNode.primaryAxisAlignItems = mapAlign(s.justifyContent);
+      figNode.counterAxisAlignItems = mapCrossAlign(s.alignItems);
     }
-    if (styles.letterSpacing) {
-      const ls = parseSize(styles.letterSpacing);
-      if (ls !== 0) element.letterSpacing = ls;
-    }
-    if (styles.textAlign) element.textAlign = styles.textAlign;
-  }
 
-  // Image
-  if (type === 'IMAGE' && node.attributes?.src) {
-    element.imageUrl = node.attributes.src;
-  }
-
-  // Only add elements that have visual content
-  const hasVisual = bgColor || type === 'TEXT' || type === 'IMAGE' ||
-    (borderWidth > 0 && borderColor) || borderRadius > 0;
-
-  if (hasVisual) {
-    elements.push(element);
-  }
-
-  // Recurse into children
-  for (const child of node.children) {
-    flattenNode(child, elements, pageOffsetY);
-  }
-}
-
-// --- Image collection ---
-
-export function collectImageUrls(elements: FigmaElement[]): string[] {
-  return elements
-    .filter((e) => e.type === 'IMAGE' && e.imageUrl)
-    .map((e) => e.imageUrl!);
-}
-
-export function injectImageBase64(
-  elements: FigmaElement[],
-  imageMap: Map<string, string>
-): void {
-  for (const el of elements) {
-    if (el.imageUrl && imageMap.has(el.imageUrl)) {
-      el.imageBase64 = imageMap.get(el.imageUrl)!;
+    // Padding
+    const pt = px(s.paddingTop) || 0;
+    const pr = px(s.paddingRight) || 0;
+    const pb = px(s.paddingBottom) || 0;
+    const pl = px(s.paddingLeft) || 0;
+    if (pt || pr || pb || pl) {
+      figNode.paddingTop = pt;
+      figNode.paddingRight = pr;
+      figNode.paddingBottom = pb;
+      figNode.paddingLeft = pl;
     }
   }
+
+  // --- Visual ---
+  const bg = toHex(s.backgroundColor);
+  if (bg) figNode.backgroundColor = bg;
+
+  const br = px(s.borderRadius);
+  if (br > 0) figNode.borderRadius = br;
+
+  const bw = px(s.borderWidth);
+  const bc = toHex(s.borderColor);
+  if (bw > 0 && bc) {
+    figNode.borderWidth = bw;
+    figNode.borderColor = bc;
+  }
+
+  if (s.opacity) {
+    const op = parseFloat(s.opacity);
+    if (!isNaN(op) && op < 1) figNode.opacity = op;
+  }
+
+  if (s.boxShadow && s.boxShadow !== 'none') {
+    figNode.boxShadow = s.boxShadow;
+  }
+
+  // --- Text ---
+  if (isText && node.textContent) {
+    figNode.characters = node.textContent;
+    figNode.fontFamily = s.fontFamily?.split(',')[0]?.replace(/['"]/g, '').trim() || 'Inter';
+    figNode.fontSize = px(s.fontSize) || 16;
+    figNode.fontWeight = s.fontWeight ? parseInt(s.fontWeight, 10) || 400 : 400;
+    figNode.textColor = toHex(s.color) || '#000000';
+    if (s.lineHeight) {
+      const lh = px(s.lineHeight);
+      if (lh > 0) figNode.lineHeight = lh;
+    }
+    if (s.letterSpacing) {
+      const ls = px(s.letterSpacing);
+      if (ls !== 0) figNode.letterSpacing = ls;
+    }
+    if (s.textAlign) figNode.textAlign = s.textAlign;
+    // Text: fill width, hug height
+    figNode.layoutSizingHorizontal = 'FILL';
+    figNode.layoutSizingVertical = 'HUG';
+  }
+
+  // --- Image ---
+  if (isImg && node.attributes?.src) {
+    figNode.imageUrl = node.attributes.src;
+    // Image: fixed size
+    figNode.layoutSizingHorizontal = 'FIXED';
+    figNode.layoutSizingVertical = 'FIXED';
+  }
+
+  // --- Children (recursive) ---
+  if (hasChildren) {
+    figNode.children = node.children.map(convertNode);
+  }
+
+  return figNode;
 }
 
-// --- Main export ---
+// --- Image helpers ---
+
+export function collectImageUrls(nodes: FigmaNode[]): string[] {
+  const urls: string[] = [];
+  function walk(n: FigmaNode) {
+    if (n.imageUrl) urls.push(n.imageUrl);
+    if (n.children) n.children.forEach(walk);
+  }
+  nodes.forEach(walk);
+  return urls;
+}
+
+export function injectImageBase64(nodes: FigmaNode[], imageMap: Map<string, string>): void {
+  function walk(n: FigmaNode) {
+    if (n.imageUrl && imageMap.has(n.imageUrl)) {
+      n.imageBase64 = imageMap.get(n.imageUrl)!;
+    }
+    if (n.children) n.children.forEach(walk);
+  }
+  nodes.forEach(walk);
+}
+
+// --- Main ---
 
 export function generateFigmaDesignSpec(
   tree: ComponentNode[],
@@ -182,38 +238,25 @@ export function generateFigmaDesignSpec(
   url: string,
   scrapedAt: string
 ): FigmaDesignSpec {
-  // Calculate page dimensions from tree
-  let maxBottom = 0;
-  let pageOffsetY = Infinity;
+  const children = tree.map(convertNode);
 
+  // Page height = sum of top-level children or max bottom coordinate
+  let totalHeight = 0;
   for (const node of tree) {
     if (node.rect) {
-      if (node.rect.y < pageOffsetY) pageOffsetY = node.rect.y;
       const bottom = node.rect.y + node.rect.height;
-      if (bottom > maxBottom) maxBottom = bottom;
+      if (bottom > totalHeight) totalHeight = bottom;
     }
-  }
-  if (pageOffsetY === Infinity) pageOffsetY = 0;
-
-  // Flatten all nodes to absolute-positioned elements
-  const elements: FigmaElement[] = [];
-  for (const node of tree) {
-    flattenNode(node, elements, pageOffsetY);
   }
 
   return {
-    version: '2.0',
-    source: {
-      url,
-      title: metadata.title || 'Untitled',
-      scrapedAt,
-    },
+    version: '3.0',
+    source: { url, title: metadata.title || 'Untitled', scrapedAt },
     page: {
       name: metadata.title || 'Cloned Page',
       width: 1440,
-      height: Math.max(900, Math.round(maxBottom - pageOffsetY)),
-      backgroundColor: '#ffffff',
-      elements,
+      height: Math.max(900, Math.round(totalHeight)),
+      children,
     },
   };
 }
