@@ -142,7 +142,7 @@ var __async = (__this, __arguments, generator) => {
   }
   function applyPaint(paint) {
     var _a, _b, _c;
-    if (!paint || !paint.visible) return void 0;
+    if (!paint || paint.visible === false) return void 0;
     if (paint.type === "SOLID" && paint.color) {
       return {
         type: "SOLID",

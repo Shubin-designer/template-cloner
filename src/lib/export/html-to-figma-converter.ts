@@ -36,9 +36,8 @@ export async function convertPageToFigmaNodes(page: Page): Promise<FigmaPageData
   // Inject html-to-figma via addScriptTag to ensure proper browser context
   await page.addScriptTag({ content: bundleCode });
 
-  // Run the conversion and strip non-serializable metadata
+  // Run the conversion, enrich with computed colors, strip metadata
   const rawData = await page.evaluate(() => {
-    // The UMD bundle exposes htmlToFigma on globalThis
     // @ts-expect-error - injected by UMD bundle
     const lib = globalThis.htmlToFigma || window.htmlToFigma;
     if (!lib || !lib.htmlToFigma) {
@@ -46,6 +45,59 @@ export async function convertPageToFigmaNodes(page: Page): Promise<FigmaPageData
     }
 
     const result = lib.htmlToFigma(document.body);
+
+    // Enrich: walk all DOM elements and add background colors
+    // that the library missed (it only checks CSS stylesheets, not computedStyle)
+    function rgbaToFill(rgba: string): Record<string, unknown> | null {
+      if (!rgba || rgba === 'rgba(0, 0, 0, 0)' || rgba === 'transparent') return null;
+      const m = rgba.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)/);
+      if (!m) return null;
+      const r = parseInt(m[1]) / 255;
+      const g = parseInt(m[2]) / 255;
+      const b = parseInt(m[3]) / 255;
+      const a = m[4] !== undefined ? parseFloat(m[4]) : 1;
+      if (a === 0) return null;
+      return { type: 'SOLID', color: { r, g, b }, opacity: a, visible: true, blendMode: 'NORMAL' };
+    }
+
+    // Walk the DOM in parallel with the figma tree to enrich fills
+    function enrichFromDOM(figmaNode: Record<string, unknown>, domEl: Element | null): void {
+      if (!figmaNode || !domEl) return;
+
+      // Add background fill if library didn't set one
+      if (!figmaNode.backgroundFill && figmaNode.type === 'FRAME') {
+        const cs = window.getComputedStyle(domEl);
+        const fill = rgbaToFill(cs.backgroundColor);
+        if (fill) {
+          figmaNode.backgroundFill = fill;
+        }
+      }
+
+      // Match children by index
+      const figmaChildren = figmaNode.children as Record<string, unknown>[] | undefined;
+      const domChildren = domEl.children;
+      if (figmaChildren && domChildren) {
+        let domIdx = 0;
+        for (let i = 0; i < figmaChildren.length && domIdx < domChildren.length; i++) {
+          const fc = figmaChildren[i];
+          if (fc && (fc.type === 'FRAME' || fc.type === 'TEXT')) {
+            enrichFromDOM(fc, domChildren[domIdx]);
+            domIdx++;
+          } else if (fc && fc.type === 'SVG') {
+            domIdx++;
+          } else if (fc) {
+            // TEXT nodes don't have matching DOM children, skip domIdx
+          }
+        }
+      }
+    }
+
+    // Try to enrich - if DOM doesn't match perfectly, just skip
+    try {
+      enrichFromDOM(result, document.body);
+    } catch {
+      // Non-critical
+    }
 
     // Strip metadata.node (DOM references — not serializable)
     function strip(node: unknown): void {
