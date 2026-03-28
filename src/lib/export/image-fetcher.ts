@@ -78,7 +78,24 @@ async function fetchSingleImage(
 
     const buffer = await response.arrayBuffer();
     if (buffer.byteLength > MAX_IMAGE_SIZE) return null;
+    if (buffer.byteLength < 100) return null; // too small, probably error page
 
+    const contentType = response.headers.get('content-type') || '';
+
+    // SVG: keep as-is (plugin handles SVG separately)
+    if (contentType.includes('svg') || fullUrl.endsWith('.svg')) {
+      return Buffer.from(buffer).toString('base64');
+    }
+
+    // PNG/JPG/GIF: Figma supports natively
+    if (contentType.includes('png') || contentType.includes('jpeg') ||
+        contentType.includes('jpg') || contentType.includes('gif')) {
+      return Buffer.from(buffer).toString('base64');
+    }
+
+    // AVIF/WebP/other: convert to PNG via canvas in a temp page
+    // For now, skip unsupported formats — they'll show as placeholders
+    // TODO: use sharp or canvas to convert
     return Buffer.from(buffer).toString('base64');
   } catch {
     return null;

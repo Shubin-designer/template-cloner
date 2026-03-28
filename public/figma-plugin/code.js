@@ -232,26 +232,35 @@ var __async = (__this, __arguments, generator) => {
       if (node.imageUrl) {
         const base64 = images[node.imageUrl];
         if (base64) {
-          const isSvg = node.imageUrl.includes(".svg") || node.imageUrl.includes("image/svg");
+          const isSvg = node.imageUrl.includes(".svg");
           if (isSvg) {
             try {
-              const svgText = decodeURIComponent(escape(atob(base64)));
+              const bytes = figma.base64Decode(base64);
+              let svgText = "";
+              for (let i = 0; i < bytes.length; i++) {
+                svgText += String.fromCharCode(bytes[i]);
+              }
               const svgNode = figma.createNodeFromSvg(svgText);
               svgNode.x = 0;
               svgNode.y = 0;
               svgNode.resize(Math.max(1, node.width), Math.max(1, node.height));
               frame.appendChild(svgNode);
               frame.clipsContent = true;
-            } catch (e) {
+            } catch (err) {
+              console.error("SVG create failed:", node.imageUrl, err);
             }
           } else {
             try {
               const raw = figma.base64Decode(base64);
               const image = figma.createImage(raw);
               frame.fills = [{ type: "IMAGE", scaleMode: "FILL", imageHash: image.hash }];
-            } catch (e) {
+            } catch (err) {
+              console.error("Image create failed:", node.imageUrl, err);
+              frame.fills = [{ type: "SOLID", color: { r: 0.85, g: 0.85, b: 0.9 } }];
             }
           }
+        } else {
+          frame.fills = [{ type: "SOLID", color: { r: 0.9, g: 0.9, b: 0.95 } }];
         }
       }
       if (node.topLeftRadius) frame.topLeftRadius = node.topLeftRadius;

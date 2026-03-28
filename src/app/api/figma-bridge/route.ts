@@ -35,16 +35,23 @@ export async function POST(request: NextRequest) {
     // Collect image URLs from the tree and pre-fetch them
     const imageUrls = collectImageUrlsFromTree(body.figmaTree);
     let imageMap = new Map<string, string>();
-    if (imageUrls.length > 0 && body.sourceUrl) {
-      imageMap = await fetchImagesAsBase64(imageUrls, body.sourceUrl);
+    if (imageUrls.length > 0) {
+      const sourceUrl = body.sourceUrl || '';
+      console.log(`[figma-bridge] Fetching ${imageUrls.length} images from ${sourceUrl}...`);
+      imageMap = await fetchImagesAsBase64(imageUrls, sourceUrl);
+      console.log(`[figma-bridge] Fetched ${imageMap.size}/${imageUrls.length} images`);
     }
 
     // Send to plugin with image data
+    const images = Object.fromEntries(imageMap);
     const spec = {
       figmaTree: body.figmaTree,
       pageInfo: body.pageInfo || { name: 'Cloned Page', width: 1440, height: 900 },
-      images: Object.fromEntries(imageMap),
+      images,
     };
+
+    const specSize = JSON.stringify(spec).length;
+    console.log(`[figma-bridge] Payload to plugin: ${(specSize/1024/1024).toFixed(1)} MB (${Object.keys(images).length} images)`);
 
     const result = await bridge.createDesign(spec);
     if (result.error) {
