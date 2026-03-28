@@ -4,9 +4,10 @@ import { ensureBridgeRunning } from '@/lib/figma-bridge/server';
 export async function GET() {
   try {
     const bridge = await ensureBridgeRunning();
+    const connected = await bridge.checkPluginConnected();
     return NextResponse.json({
       status: 'ok',
-      pluginConnected: bridge.isPluginConnected(),
+      pluginConnected: connected,
     });
   } catch (error) {
     return NextResponse.json({
@@ -21,9 +22,10 @@ export async function POST(request: NextRequest) {
   try {
     const bridge = await ensureBridgeRunning();
 
-    if (!bridge.isPluginConnected()) {
+    const connected = await bridge.checkPluginConnected();
+    if (!connected) {
       return NextResponse.json({
-        error: 'Figma plugin not connected. Open the MCP Bridge plugin in Figma and keep it running.',
+        error: 'Figma plugin not connected. Open the SiteCloner Bridge plugin in Figma and keep it running.',
       }, { status: 503 });
     }
 
@@ -33,13 +35,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid design spec' }, { status: 400 });
     }
 
-    const resp = await bridge.sendToPlugin('create_design', spec);
+    const result = await bridge.createDesign(spec);
 
-    if (resp.error) {
-      return NextResponse.json({ error: resp.error }, { status: 500 });
+    if (result.error) {
+      return NextResponse.json({ error: result.error }, { status: 500 });
     }
 
-    return NextResponse.json({ data: resp.data });
+    return NextResponse.json({ data: result.data });
   } catch (error) {
     return NextResponse.json({
       error: error instanceof Error ? error.message : String(error),

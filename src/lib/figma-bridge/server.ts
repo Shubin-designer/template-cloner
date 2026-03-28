@@ -14,6 +14,8 @@ interface BridgeResponse {
   error?: string;
 }
 
+const BRIDGE_PORT = 1994;
+
 /**
  * Embedded Figma MCP Bridge server.
  * Runs on port 1994 alongside the Next.js app.
@@ -26,6 +28,7 @@ class FigmaBridge {
   private pending = new Map<string, PendingRequest>();
   private counter = 0;
   private started = false;
+  private ownsPort = false; // true if WE started the HTTP server
 
   constructor() {
     this.wss = new WebSocketServer({ noServer: true });
@@ -39,7 +42,7 @@ class FigmaBridge {
     return this.conn !== null && this.conn.readyState === WebSocket.OPEN;
   }
 
-  start(port = 1994): Promise<void> {
+  start(): Promise<void> {
     if (this.started) return Promise.resolve();
 
     return new Promise((resolve, reject) => {
@@ -85,8 +88,9 @@ class FigmaBridge {
 
       server.once('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EADDRINUSE') {
-          // Port already taken — another bridge is running, that's OK
-          console.log(`[FigmaBridge] Port ${port} already in use, assuming external bridge`);
+          // Port already taken — external bridge is running
+          console.log(`[FigmaBridge] Port ${BRIDGE_PORT} in use, will proxy to external bridge`);
+          this.ownsPort = false;
           this.started = true;
           resolve();
         } else {
@@ -94,10 +98,11 @@ class FigmaBridge {
         }
       });
 
-      server.listen(port, () => {
+      server.listen(BRIDGE_PORT, () => {
         this.httpServer = server;
+        this.ownsPort = true;
         this.started = true;
-        console.log(`[FigmaBridge] Listening on :${port}`);
+        console.log(`[FigmaBridge] Listening on :${BRIDGE_PORT}`);
         resolve();
       });
     });
@@ -137,13 +142,76 @@ class FigmaBridge {
     });
   }
 
-  sendToPlugin(
+  /**
+   * Check if plugin is connected — either locally or via external bridge.
+   */
+  async checkPluginConnected(): Promise<boolean> {
+    if (this.isPluginConnected()) return true;
+
+    // If we don't own the port, check external bridge
+    if (!this.ownsPort) {
+      return this.pingExternalBridge();
+    }
+
+    return false;
+  }
+
+  private async pingExternalBridge(): Promise<boolean> {
+    try {
+      const res = await fetch(`http://localhost:${BRIDGE_PORT}/ping`, {
+        signal: AbortSignal.timeout(2000),
+      });
+      const data = await res.json();
+      return data.pluginConnected === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Send create_design to plugin — either directly or via external bridge.
+   */
+  async createDesign(spec: Record<string, unknown>): Promise<{ data?: unknown; error?: string }> {
+    // Direct connection
+    if (this.isPluginConnected()) {
+      try {
+        const resp = await this.sendToPlugin('create_design', spec);
+        if (resp.error) return { error: resp.error };
+        return { data: resp.data };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    // Proxy to external bridge
+    if (!this.ownsPort) {
+      return this.proxyCreateDesign(spec);
+    }
+
+    return { error: 'Figma plugin not connected. Open the SiteCloner Bridge plugin in Figma.' };
+  }
+
+  private async proxyCreateDesign(spec: Record<string, unknown>): Promise<{ data?: unknown; error?: string }> {
+    try {
+      const res = await fetch(`http://localhost:${BRIDGE_PORT}/api/create-design`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(spec),
+        signal: AbortSignal.timeout(30_000),
+      });
+      return await res.json();
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  private sendToPlugin(
     requestType: string,
     params?: Record<string, unknown>
   ): Promise<BridgeResponse> {
     return new Promise((resolve, reject) => {
       if (!this.conn || this.conn.readyState !== WebSocket.OPEN) {
-        reject(new Error('Figma plugin not connected. Open the MCP Bridge plugin in Figma.'));
+        reject(new Error('Figma plugin not connected'));
         return;
       }
 
@@ -152,7 +220,7 @@ class FigmaBridge {
 
       const timeout = setTimeout(() => {
         this.pending.delete(requestId);
-        reject(new Error('Request timed out (30s). Check the Figma plugin is running.'));
+        reject(new Error('Request timed out (30s)'));
       }, 30_000);
 
       this.pending.set(requestId, { resolve, reject, timeout });
@@ -173,28 +241,17 @@ class FigmaBridge {
     req.on('end', async () => {
       try {
         const spec = JSON.parse(body);
-        if (!spec.pages || !Array.isArray(spec.pages)) {
-          this.sendJSON(res, 400, { error: 'Invalid design spec: missing pages array' });
-          return;
-        }
-
-        const resp = await this.sendToPlugin('create_design', spec);
-        if (resp.error) {
-          this.sendJSON(res, 200, { error: resp.error });
-        } else {
-          this.sendJSON(res, 200, { data: resp.data });
-        }
+        const result = await this.createDesign(spec);
+        const status = result.error ? 200 : 200;
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
       } catch (err) {
-        this.sendJSON(res, 200, {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
           error: err instanceof Error ? err.message : String(err),
-        });
+        }));
       }
     });
-  }
-
-  private sendJSON(res: http.ServerResponse, status: number, body: { data?: unknown; error?: string }): void {
-    res.writeHead(status, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(body));
   }
 
   private nextId(): string {
@@ -207,14 +264,14 @@ class FigmaBridge {
   }
 }
 
-// Singleton — one bridge per Next.js process
-let bridge: FigmaBridge | null = null;
+// Use globalThis to survive Next.js hot-reloads in dev mode
+const globalForBridge = globalThis as unknown as { __figmaBridge?: FigmaBridge };
 
 export function getBridge(): FigmaBridge {
-  if (!bridge) {
-    bridge = new FigmaBridge();
+  if (!globalForBridge.__figmaBridge) {
+    globalForBridge.__figmaBridge = new FigmaBridge();
   }
-  return bridge;
+  return globalForBridge.__figmaBridge;
 }
 
 export async function ensureBridgeRunning(): Promise<FigmaBridge> {

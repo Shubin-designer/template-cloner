@@ -88,6 +88,37 @@ interface FigmaStroke {
 
 // --- Helpers ---
 
+/**
+ * Convert any CSS color (hex, rgb(), rgba()) to a valid #rrggbb hex string.
+ * Returns null if the color can't be parsed or is transparent.
+ */
+function toHex(color: string | undefined): string | null {
+  if (!color || color === 'transparent' || color === 'none') return null;
+
+  // Already hex
+  if (/^#[0-9a-fA-F]{3,8}$/.test(color)) {
+    const h = color.replace('#', '');
+    if (h.length === 3) {
+      return `#${h[0]}${h[0]}${h[1]}${h[1]}${h[2]}${h[2]}`;
+    }
+    return `#${h.substring(0, 6)}`;
+  }
+
+  // rgb() or rgba()
+  const match = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (match) {
+    const r = parseInt(match[1], 10);
+    const g = parseInt(match[2], 10);
+    const b = parseInt(match[3], 10);
+    return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+  }
+
+  // rgba(0, 0, 0, 0) — transparent
+  if (/rgba\(.+,\s*0\s*\)/.test(color)) return null;
+
+  return null;
+}
+
 function parseSize(value: string | undefined): number {
   if (!value) return 0;
   const num = parseFloat(value);
@@ -174,15 +205,19 @@ function nodeToFigmaFrame(node: ComponentNode): FigmaFrameSpec {
   }
 
   // Fills
-  if (styles.backgroundColor) {
-    frame.fills = [{ type: 'SOLID', color: styles.backgroundColor }];
+  const bgHex = toHex(styles.backgroundColor);
+  if (bgHex) {
+    frame.fills = [{ type: 'SOLID', color: bgHex }];
   }
 
   // Border
   if (styles.border && styles.border !== 'none' && !styles.border.startsWith('0px')) {
     const borderMatch = styles.border.match(/(\d+)px\s+\w+\s+(#[0-9a-fA-F]+|rgb[^)]+\))/);
     if (borderMatch) {
-      frame.strokes = [{ type: 'SOLID', color: borderMatch[2], weight: parseInt(borderMatch[1], 10) }];
+      const strokeHex = toHex(borderMatch[2]);
+      if (strokeHex) {
+        frame.strokes = [{ type: 'SOLID', color: strokeHex, weight: parseInt(borderMatch[1], 10) }];
+      }
     }
   }
 
@@ -207,8 +242,9 @@ function nodeToFigmaFrame(node: ComponentNode): FigmaFrameSpec {
       lineHeight: parseSize(styles.lineHeight) || undefined,
       letterSpacing: parseSize(styles.letterSpacing) || undefined,
     };
-    if (styles.color) {
-      frame.fills = [{ type: 'SOLID', color: styles.color }];
+    const textHex = toHex(styles.color);
+    if (textHex) {
+      frame.fills = [{ type: 'SOLID', color: textHex }];
     }
   }
 
@@ -234,11 +270,13 @@ function extractDesignTokens(nodes: ComponentNode[]): FigmaDesignSpec['designTok
     const s = node.styles;
 
     // Colors
-    if (s.backgroundColor && s.backgroundColor.startsWith('#')) {
-      colorMap.set(s.backgroundColor, 'background');
+    const bgToken = toHex(s.backgroundColor);
+    if (bgToken) {
+      colorMap.set(bgToken, 'background');
     }
-    if (s.color && s.color.startsWith('#')) {
-      colorMap.set(s.color, 'text');
+    const textToken = toHex(s.color);
+    if (textToken) {
+      colorMap.set(textToken, 'text');
     }
 
     // Typography
