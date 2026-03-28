@@ -2,12 +2,12 @@ import type { Page } from 'playwright';
 import type { ComponentNode } from '@/types/component-tree';
 
 const SKIP_TAGS = new Set([
-  'script', 'style', 'link', 'meta', 'noscript', 'svg', 'br', 'hr',
+  'script', 'style', 'link', 'meta', 'noscript', 'br',
   'head', 'title', 'base',
 ]);
 
-const MAX_DEPTH = 8;
-const MAX_CHILDREN = 50;
+const MAX_DEPTH = 12;
+const MAX_CHILDREN = 80;
 
 /**
  * Build a component tree by evaluating the DOM in Playwright's browser context.
@@ -19,7 +19,6 @@ export async function buildComponentTree(page: Page): Promise<ComponentNode[]> {
       let nodeCounter = 0;
       let isFirstLargeSection = true;
 
-      // Semantic tag → type mapping (inline for browser context)
       const SEMANTIC_TAGS: Record<string, string> = {
         header: 'header', nav: 'nav', footer: 'footer', main: 'section',
         section: 'section', article: 'card', form: 'form', button: 'button',
@@ -35,60 +34,95 @@ export async function buildComponentTree(page: Page): Promise<ComponentNode[]> {
       ];
 
       function classify(
-        tag: string,
-        cls: string,
-        id: string,
-        depth: number,
-        isLarge: boolean
+        tag: string, cls: string, id: string, depth: number, isLarge: boolean
       ): string {
         const mapped = SEMANTIC_TAGS[tag.toLowerCase()];
         if (mapped) return mapped;
-
         const text = `${cls} ${id}`.toLowerCase();
         for (const [pattern, type] of CLASS_PATTERNS) {
           if (text.includes(pattern)) return type;
         }
-
-        if (isLarge && depth <= 2) {
-          return 'hero';
-        }
-
+        if (isLarge && depth <= 2) return 'hero';
         if (depth <= 1) return 'section';
         if (depth <= 3) return 'block';
         return 'element';
       }
 
+      function rgbToHex(rgb: string): string {
+        if (!rgb || rgb === 'transparent' || rgb === 'rgba(0, 0, 0, 0)') return '';
+        if (rgb.startsWith('#')) return rgb;
+        const match = rgb.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+        if (!match) return rgb;
+        const r = parseInt(match[1], 10);
+        const g = parseInt(match[2], 10);
+        const b = parseInt(match[3], 10);
+        return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+      }
+
       function extractStyles(el: Element): Record<string, string> {
         const cs = window.getComputedStyle(el);
+
+        // Convert colors to hex right here in browser context
+        const bgColor = rgbToHex(cs.backgroundColor);
+        const textColor = rgbToHex(cs.color);
+
         return {
+          // Layout
           display: cs.display,
-          flexDirection: cs.flexDirection !== 'row' ? cs.flexDirection : '',
+          flexDirection: cs.flexDirection,
+          flexWrap: cs.flexWrap !== 'nowrap' ? cs.flexWrap : '',
           alignItems: cs.alignItems,
           justifyContent: cs.justifyContent,
           gap: cs.gap !== 'normal' ? cs.gap : '',
-          padding: cs.padding !== '0px' ? cs.padding : '',
-          margin: cs.margin !== '0px' ? cs.margin : '',
-          backgroundColor: cs.backgroundColor !== 'rgba(0, 0, 0, 0)' ? cs.backgroundColor : '',
-          color: cs.color,
+          gridTemplateColumns: cs.gridTemplateColumns !== 'none' ? cs.gridTemplateColumns : '',
+          // Spacing
+          padding: cs.padding,
+          paddingTop: cs.paddingTop,
+          paddingRight: cs.paddingRight,
+          paddingBottom: cs.paddingBottom,
+          paddingLeft: cs.paddingLeft,
+          margin: cs.margin,
+          // Colors (already hex)
+          backgroundColor: bgColor,
+          color: textColor,
+          // Background extras
+          backgroundImage: cs.backgroundImage !== 'none' ? cs.backgroundImage : '',
+          // Typography
           fontSize: cs.fontSize,
           fontFamily: cs.fontFamily,
-          fontWeight: cs.fontWeight !== '400' ? cs.fontWeight : '',
+          fontWeight: cs.fontWeight,
           lineHeight: cs.lineHeight,
-          borderRadius: cs.borderRadius !== '0px' ? cs.borderRadius : '',
-          border: cs.border,
+          letterSpacing: cs.letterSpacing !== 'normal' ? cs.letterSpacing : '',
+          textAlign: cs.textAlign,
+          textTransform: cs.textTransform !== 'none' ? cs.textTransform : '',
+          textDecoration: cs.textDecorationLine !== 'none' ? cs.textDecorationLine : '',
+          // Dimensions
           width: cs.width,
           height: cs.height,
+          minWidth: cs.minWidth !== '0px' ? cs.minWidth : '',
+          maxWidth: cs.maxWidth !== 'none' ? cs.maxWidth : '',
+          minHeight: cs.minHeight !== '0px' ? cs.minHeight : '',
+          // Border
+          borderRadius: cs.borderRadius !== '0px' ? cs.borderRadius : '',
+          borderWidth: cs.borderWidth !== '0px' ? cs.borderWidth : '',
+          borderColor: cs.borderWidth !== '0px' ? rgbToHex(cs.borderColor) : '',
+          borderStyle: cs.borderStyle !== 'none' ? cs.borderStyle : '',
+          // Effects
+          boxShadow: cs.boxShadow !== 'none' ? cs.boxShadow : '',
+          opacity: cs.opacity !== '1' ? cs.opacity : '',
+          // Position
           position: cs.position !== 'static' ? cs.position : '',
           overflow: cs.overflow !== 'visible' ? cs.overflow : '',
-          opacity: cs.opacity !== '1' ? cs.opacity : '',
+          zIndex: cs.zIndex !== 'auto' ? cs.zIndex : '',
         };
       }
 
       function isVisible(el: Element): boolean {
         const cs = window.getComputedStyle(el);
         if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+        if (cs.opacity === '0') return false;
         const rect = el.getBoundingClientRect();
-        if (rect.width === 0 && rect.height === 0) return false;
+        if (rect.width < 1 && rect.height < 1) return false;
         return true;
       }
 
@@ -100,7 +134,7 @@ export async function buildComponentTree(page: Page): Promise<ComponentNode[]> {
             if (t) text += (text ? ' ' : '') + t;
           }
         }
-        return text.slice(0, 200); // Limit text length
+        return text.slice(0, 500);
       }
 
       interface TreeNodeData {
@@ -118,18 +152,16 @@ export async function buildComponentTree(page: Page): Promise<ComponentNode[]> {
 
       function walk(el: Element, depth: number): TreeNodeData | null {
         if (depth > maxDepth) return null;
-
         const tag = el.tagName.toLowerCase();
         if (skipTags.includes(tag)) return null;
         if (!isVisible(el)) return null;
-
         return buildNode(el, tag, depth);
       }
 
       function buildNode(el: Element, tag: string, depth: number): TreeNodeData {
         const id = `node-${nodeCounter++}`;
         const className = el.className && typeof el.className === 'string'
-          ? el.className.trim().slice(0, 200)
+          ? el.className.trim().slice(0, 300)
           : undefined;
         const elId = el.id || undefined;
 
@@ -145,7 +177,7 @@ export async function buildComponentTree(page: Page): Promise<ComponentNode[]> {
         const styles = extractStyles(el);
         const textContent = getTextContent(el);
 
-        // Build children (limit count)
+        // Build children
         const children: TreeNodeData[] = [];
         const childElements = el.children;
         const limit = Math.min(childElements.length, maxChildren);
@@ -154,18 +186,7 @@ export async function buildComponentTree(page: Page): Promise<ComponentNode[]> {
           if (child) children.push(child);
         }
 
-        // Collapse single-child wrapper divs
-        if (
-          children.length === 1 &&
-          (tag === 'div' || tag === 'span') &&
-          !textContent &&
-          !className
-        ) {
-          const child = children[0];
-          child.depth = depth;
-          return child;
-        }
-
+        // Collect attributes
         const attributes: Record<string, string> = {};
         if (tag === 'a') {
           const href = el.getAttribute('href');
@@ -176,6 +197,9 @@ export async function buildComponentTree(page: Page): Promise<ComponentNode[]> {
           const alt = el.getAttribute('alt');
           if (src) attributes.src = src;
           if (alt) attributes.alt = alt;
+        }
+        if (tag === 'svg') {
+          attributes.svg = 'true';
         }
 
         return {
@@ -197,7 +221,6 @@ export async function buildComponentTree(page: Page): Promise<ComponentNode[]> {
         };
       }
 
-      // Start from body
       const body = document.body;
       if (!body) return [];
 
@@ -221,16 +244,11 @@ export async function buildComponentTree(page: Page): Promise<ComponentNode[]> {
 
 /**
  * Build a component tree from a static HTML string (for testing).
- * Uses jsdom-compatible structure, not Playwright.
  */
 export function buildTreeFromHTML(
   document: { body: Element | null },
   classify: (
-    tag: string,
-    className: string,
-    id: string,
-    depth: number,
-    isLarge: boolean
+    tag: string, className: string, id: string, depth: number, isLarge: boolean
   ) => string
 ): ComponentNode[] {
   const body = document.body;
@@ -264,7 +282,7 @@ export function buildTreeFromHTML(
       className,
       children,
       styles: {},
-      textContent: el.textContent?.trim().slice(0, 200) || undefined,
+      textContent: el.textContent?.trim().slice(0, 500) || undefined,
       depth,
     };
   }

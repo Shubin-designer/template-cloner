@@ -177,9 +177,9 @@ var __async = (__this, __arguments, generator) => {
             };
           });
         }
-        text.x = Math.round(spec.x);
-        text.y = Math.round(spec.y);
-        text.resize(Math.max(1, spec.width), Math.max(1, spec.height));
+        text.layoutAlign = "STRETCH";
+        text.layoutGrow = 0;
+        text.textAutoResize = "HEIGHT";
         parent.appendChild(text);
         return text;
       }
@@ -189,7 +189,7 @@ var __async = (__this, __arguments, generator) => {
       frame.layoutAlign = "STRETCH";
       if (spec.layoutMode === "HORIZONTAL" || spec.layoutMode === "VERTICAL") {
         frame.layoutMode = spec.layoutMode;
-        frame.primaryAxisSizingMode = "FIXED";
+        frame.primaryAxisSizingMode = "AUTO";
         frame.counterAxisSizingMode = "FIXED";
         if (spec.itemSpacing != null) frame.itemSpacing = spec.itemSpacing;
         if (spec.primaryAxisAlignItems) frame.primaryAxisAlignItems = spec.primaryAxisAlignItems;

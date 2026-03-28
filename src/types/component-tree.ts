@@ -18,33 +18,53 @@ export type NodeType =
   | 'input';
 
 export interface StyleData {
+  // Layout
   display?: string;
   flexDirection?: string;
+  flexWrap?: string;
   alignItems?: string;
   justifyContent?: string;
   gap?: string;
+  gridTemplateColumns?: string;
+  // Spacing
   padding?: string;
+  paddingTop?: string;
+  paddingRight?: string;
+  paddingBottom?: string;
+  paddingLeft?: string;
   margin?: string;
+  // Colors
   backgroundColor?: string;
   color?: string;
+  backgroundImage?: string;
+  // Typography
   fontSize?: string;
   fontFamily?: string;
   fontWeight?: string;
   lineHeight?: string;
   letterSpacing?: string;
   textAlign?: string;
-  borderRadius?: string;
-  border?: string;
-  boxShadow?: string;
+  textTransform?: string;
+  textDecoration?: string;
+  // Dimensions
   width?: string;
   height?: string;
   minWidth?: string;
-  minHeight?: string;
   maxWidth?: string;
+  minHeight?: string;
+  // Border
+  borderRadius?: string;
+  borderWidth?: string;
+  borderColor?: string;
+  borderStyle?: string;
+  border?: string;
+  // Effects
+  boxShadow?: string;
+  opacity?: string;
+  // Position
   position?: string;
   overflow?: string;
-  opacity?: string;
-  gridTemplateColumns?: string;
+  zIndex?: string;
 }
 
 export interface ComponentNode {

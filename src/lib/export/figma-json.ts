@@ -1,4 +1,4 @@
-import type { ComponentNode, StyleData } from '@/types/component-tree';
+import type { ComponentNode } from '@/types/component-tree';
 import type { PageMetadata } from '@/types/clone';
 
 /**
@@ -146,13 +146,6 @@ function parseFontWeight(value: string | undefined): number {
   return isNaN(num) ? 400 : num;
 }
 
-function mapLayoutMode(styles: StyleData): 'HORIZONTAL' | 'VERTICAL' | 'NONE' {
-  if (styles.display === 'flex' || styles.display === 'inline-flex') {
-    return styles.flexDirection === 'column' ? 'VERTICAL' : 'HORIZONTAL';
-  }
-  return 'NONE';
-}
-
 function mapAlign(value: string | undefined): 'MIN' | 'CENTER' | 'MAX' | 'SPACE_BETWEEN' {
   switch (value) {
     case 'center': return 'CENTER';
@@ -217,22 +210,19 @@ function estimateGap(children: ComponentNode[], direction: 'HORIZONTAL' | 'VERTI
 
 function nodeToFigmaFrame(node: ComponentNode): FigmaFrameSpec {
   const styles = node.styles;
-  const padding = parsePadding(styles.padding);
-  const isText = node.textContent && node.children.length === 0 && node.tag !== 'img';
-  const isImage = node.tag === 'img';
+  const isText = !!(node.textContent && node.children.length === 0 && node.tag !== 'img');
+  const isImage = node.tag === 'img' || node.tag === 'svg';
 
   const frame: FigmaFrameSpec = {
     name: `${node.type}/${node.tag}${node.className ? '.' + node.className.split(' ')[0] : ''}`,
     type: isImage ? 'IMAGE' : isText ? 'TEXT' : 'FRAME',
-    // Children inside Auto Layout don't need x/y — Figma positions them automatically.
-    // We set 0,0 here; the parent's Auto Layout handles placement.
     x: 0,
     y: 0,
     width: Math.max(1, (node.rect?.width ?? parseSize(styles.width)) || 100),
     height: Math.max(1, (node.rect?.height ?? parseSize(styles.height)) || 40),
   };
 
-  // Auto Layout for containers
+  // Auto Layout for containers with children
   if (frame.type === 'FRAME' && node.children.length > 0) {
     const layoutMode = inferLayoutMode(node);
     if (layoutMode !== 'NONE') {
@@ -243,22 +233,39 @@ function nodeToFigmaFrame(node: ComponentNode): FigmaFrameSpec {
     }
   }
 
-  // Padding
-  if (padding.top || padding.right || padding.bottom || padding.left) {
-    frame.paddingTop = padding.top;
-    frame.paddingRight = padding.right;
-    frame.paddingBottom = padding.bottom;
-    frame.paddingLeft = padding.left;
+  // Padding — prefer individual values, fallback to shorthand
+  const pt = parseSize(styles.paddingTop);
+  const pr = parseSize(styles.paddingRight);
+  const pb = parseSize(styles.paddingBottom);
+  const pl = parseSize(styles.paddingLeft);
+  if (pt || pr || pb || pl) {
+    frame.paddingTop = pt;
+    frame.paddingRight = pr;
+    frame.paddingBottom = pb;
+    frame.paddingLeft = pl;
+  } else {
+    const padding = parsePadding(styles.padding);
+    if (padding.top || padding.right || padding.bottom || padding.left) {
+      frame.paddingTop = padding.top;
+      frame.paddingRight = padding.right;
+      frame.paddingBottom = padding.bottom;
+      frame.paddingLeft = padding.left;
+    }
   }
 
-  // Fills
+  // Fills — background color
   const bgHex = toHex(styles.backgroundColor);
   if (bgHex) {
     frame.fills = [{ type: 'SOLID', color: bgHex }];
   }
 
-  // Border
-  if (styles.border && styles.border !== 'none' && !styles.border.startsWith('0px')) {
+  // Border — use individual border properties (more reliable than shorthand)
+  const borderWidth = parseSize(styles.borderWidth);
+  const borderHex = toHex(styles.borderColor);
+  if (borderWidth > 0 && borderHex && styles.borderStyle && styles.borderStyle !== 'none') {
+    frame.strokes = [{ type: 'SOLID', color: borderHex, weight: borderWidth }];
+  } else if (styles.border && styles.border !== 'none' && !styles.border.startsWith('0px')) {
+    // Fallback to shorthand parsing
     const borderMatch = styles.border.match(/(\d+)px\s+\w+\s+(#[0-9a-fA-F]+|rgb[^)]+\))/);
     if (borderMatch) {
       const strokeHex = toHex(borderMatch[2]);
@@ -275,7 +282,8 @@ function nodeToFigmaFrame(node: ComponentNode): FigmaFrameSpec {
 
   // Opacity
   if (styles.opacity) {
-    frame.opacity = parseFloat(styles.opacity);
+    const op = parseFloat(styles.opacity);
+    if (!isNaN(op) && op < 1) frame.opacity = op;
   }
 
   // Text content
