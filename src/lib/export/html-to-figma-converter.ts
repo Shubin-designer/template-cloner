@@ -14,7 +14,26 @@ export async function convertPageToFigmaNodes(page: Page): Promise<FigmaPageData
   );
   const bundleCode = fs.readFileSync(bundlePath, 'utf8');
 
-  // Inject via addScriptTag to ensure it runs in proper browser context
+  // Force all elements visible — Webflow/GSAP animations hide elements
+  // with visibility:hidden, opacity:0, or transforms until scroll triggers
+  await page.evaluate(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      * {
+        visibility: visible !important;
+        opacity: 1 !important;
+        transform: none !important;
+        transition: none !important;
+        animation: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+  });
+
+  // Wait for styles to apply
+  await page.waitForTimeout(500);
+
+  // Inject html-to-figma via addScriptTag to ensure proper browser context
   await page.addScriptTag({ content: bundleCode });
 
   // Run the conversion and strip non-serializable metadata
@@ -29,14 +48,15 @@ export async function convertPageToFigmaNodes(page: Page): Promise<FigmaPageData
     const result = lib.htmlToFigma(document.body);
 
     // Strip metadata.node (DOM references — not serializable)
-    function strip(node: Record<string, unknown>): void {
-      if (node.metadata) {
-        const meta = node.metadata as Record<string, unknown>;
-        delete meta.node;
+    function strip(node: unknown): void {
+      if (!node || typeof node !== 'object') return;
+      const n = node as Record<string, unknown>;
+      if (n.metadata && typeof n.metadata === 'object') {
+        delete (n.metadata as Record<string, unknown>).node;
       }
-      if (Array.isArray(node.children)) {
-        for (const child of node.children) {
-          strip(child as Record<string, unknown>);
+      if (Array.isArray(n.children)) {
+        for (const child of n.children) {
+          strip(child);
         }
       }
     }
