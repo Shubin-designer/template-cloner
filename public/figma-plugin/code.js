@@ -223,9 +223,15 @@ var __async = (__this, __arguments, generator) => {
       frame.resize(Math.max(1, node.width), Math.max(node.height, 1));
       frame.clipsContent = node.clipsContent !== false;
       if (node.backgroundFill) {
-        const p = applyPaint(node.backgroundFill);
-        if (p) frame.fills = [p];
-        else frame.fills = [];
+        const c = node.backgroundFill.color;
+        const isPureBlack = c && c.r === 0 && c.g === 0 && c.b === 0;
+        if (!isPureBlack) {
+          const p = applyPaint(node.backgroundFill);
+          if (p) frame.fills = [p];
+          else frame.fills = [];
+        } else {
+          frame.fills = [];
+        }
       } else {
         frame.fills = [];
       }
