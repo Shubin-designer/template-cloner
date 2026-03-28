@@ -232,11 +232,25 @@ var __async = (__this, __arguments, generator) => {
       if (node.imageUrl) {
         const base64 = images[node.imageUrl];
         if (base64) {
-          try {
-            const raw = figma.base64Decode(base64);
-            const image = figma.createImage(raw);
-            frame.fills = [{ type: "IMAGE", scaleMode: "FILL", imageHash: image.hash }];
-          } catch (e) {
+          const isSvg = node.imageUrl.includes(".svg") || node.imageUrl.includes("image/svg");
+          if (isSvg) {
+            try {
+              const svgText = decodeURIComponent(escape(atob(base64)));
+              const svgNode = figma.createNodeFromSvg(svgText);
+              svgNode.x = 0;
+              svgNode.y = 0;
+              svgNode.resize(Math.max(1, node.width), Math.max(1, node.height));
+              frame.appendChild(svgNode);
+              frame.clipsContent = true;
+            } catch (e) {
+            }
+          } else {
+            try {
+              const raw = figma.base64Decode(base64);
+              const image = figma.createImage(raw);
+              frame.fills = [{ type: "IMAGE", scaleMode: "FILL", imageHash: image.hash }];
+            } catch (e) {
+            }
           }
         }
       }
