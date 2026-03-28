@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ensureBridgeRunning } from '@/lib/figma-bridge/server';
+import { collectImageUrls, injectImageBase64 } from '@/lib/export/figma-json';
+import { fetchImagesAsBase64 } from '@/lib/export/image-fetcher';
 
 export async function GET() {
   try {
@@ -33,6 +35,18 @@ export async function POST(request: NextRequest) {
 
     if (!spec.pages || !Array.isArray(spec.pages)) {
       return NextResponse.json({ error: 'Invalid design spec' }, { status: 400 });
+    }
+
+    // Pre-fetch all images and inject base64 data
+    const sourceUrl = spec.source?.url || '';
+    for (const page of spec.pages) {
+      if (page.children) {
+        const imageUrls = collectImageUrls(page.children);
+        if (imageUrls.length > 0) {
+          const imageMap = await fetchImagesAsBase64(imageUrls, sourceUrl);
+          injectImageBase64(page.children, imageMap);
+        }
+      }
     }
 
     const result = await bridge.createDesign(spec);

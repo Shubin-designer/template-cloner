@@ -72,6 +72,7 @@ export interface FigmaFrameSpec {
   children?: FigmaFrameSpec[];
   // Image reference
   imageUrl?: string;
+  imageBase64?: string; // base64 encoded image data
 }
 
 interface FigmaFill {
@@ -221,6 +222,11 @@ function nodeToFigmaFrame(node: ComponentNode): FigmaFrameSpec {
     width: Math.max(1, (node.rect?.width ?? parseSize(styles.width)) || 100),
     height: Math.max(1, (node.rect?.height ?? parseSize(styles.height)) || 40),
   };
+
+  // Cap heights — browser rects can be huge for scrollable containers
+  if (frame.height > 2000 && frame.type === 'FRAME') {
+    frame.height = Math.min(frame.height, 1200);
+  }
 
   // Auto Layout for containers with children
   if (frame.type === 'FRAME' && node.children.length > 0) {
@@ -380,6 +386,37 @@ function extractDesignTokens(nodes: ComponentNode[]): FigmaDesignSpec['designTok
   const spacing = Array.from(spacingSet).sort((a, b) => a - b);
 
   return { colors, typography, spacing };
+}
+
+// --- Image collection ---
+
+/**
+ * Collect all image URLs from the spec tree for pre-fetching.
+ */
+export function collectImageUrls(frames: FigmaFrameSpec[]): string[] {
+  const urls: string[] = [];
+  function walk(frame: FigmaFrameSpec) {
+    if (frame.imageUrl) urls.push(frame.imageUrl);
+    if (frame.children) frame.children.forEach(walk);
+  }
+  frames.forEach(walk);
+  return urls;
+}
+
+/**
+ * Inject base64 image data into the spec tree.
+ */
+export function injectImageBase64(
+  frames: FigmaFrameSpec[],
+  imageMap: Map<string, string>
+): void {
+  function walk(frame: FigmaFrameSpec) {
+    if (frame.imageUrl && imageMap.has(frame.imageUrl)) {
+      frame.imageBase64 = imageMap.get(frame.imageUrl)!;
+    }
+    if (frame.children) frame.children.forEach(walk);
+  }
+  frames.forEach(walk);
 }
 
 // --- Main export ---

@@ -183,6 +183,28 @@ var __async = (__this, __arguments, generator) => {
         parent.appendChild(text);
         return text;
       }
+      if (spec.type === "IMAGE" && spec.imageBase64) {
+        const frame2 = figma.createRectangle();
+        frame2.name = spec.name || "Image";
+        frame2.resize(Math.max(1, spec.width), Math.max(1, spec.height));
+        frame2.layoutAlign = "STRETCH";
+        try {
+          const raw = figma.base64Decode(spec.imageBase64);
+          const image = figma.createImage(raw);
+          frame2.fills = [{
+            type: "IMAGE",
+            scaleMode: "FILL",
+            imageHash: image.hash
+          }];
+        } catch (e) {
+          frame2.fills = [{ type: "SOLID", color: { r: 0.85, g: 0.85, b: 0.85 } }];
+        }
+        if (spec.cornerRadius != null && spec.cornerRadius > 0) {
+          frame2.cornerRadius = spec.cornerRadius;
+        }
+        parent.appendChild(frame2);
+        return frame2;
+      }
       const frame = figma.createFrame();
       frame.name = spec.name || "Frame";
       frame.resize(Math.max(1, spec.width), Math.max(1, spec.height));
