@@ -107,8 +107,27 @@ export async function scrapePage(url: string): Promise<ScrapeResult> {
       timeout: 30_000,
     });
 
-    // Wait a bit for any lazy-loaded content
-    await page.waitForTimeout(1000);
+    // Scroll through the entire page to trigger all scroll-based animations
+    // (Webflow, GSAP, AOS, etc. show elements on scroll)
+    await page.evaluate(async () => {
+      const scrollHeight = document.body.scrollHeight;
+      const viewportHeight = window.innerHeight;
+      const step = viewportHeight / 2;
+
+      for (let y = 0; y < scrollHeight; y += step) {
+        window.scrollTo(0, y);
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      // Scroll to very bottom
+      window.scrollTo(0, scrollHeight);
+      await new Promise((r) => setTimeout(r, 500));
+      // Scroll back to top for screenshot
+      window.scrollTo(0, 0);
+      await new Promise((r) => setTimeout(r, 300));
+    });
+
+    // Wait for all animations to complete
+    await page.waitForTimeout(1500);
 
     // Extract data in parallel
     const [html, screenshotBuffer, metadata, tree] = await Promise.all([

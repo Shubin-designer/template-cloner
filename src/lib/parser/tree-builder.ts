@@ -119,8 +119,11 @@ export async function buildComponentTree(page: Page): Promise<ComponentNode[]> {
 
       function isVisible(el: Element): boolean {
         const cs = window.getComputedStyle(el);
-        if (cs.display === 'none' || cs.visibility === 'hidden') return false;
-        if (cs.opacity === '0') return false;
+        // Only skip display:none — these truly don't exist in layout
+        if (cs.display === 'none') return false;
+        // DON'T skip opacity:0 or visibility:hidden — these elements exist
+        // in the layout and may be animated into view by JS.
+        // Skip only truly zero-size elements (not even 1px)
         const rect = el.getBoundingClientRect();
         if (rect.width < 1 && rect.height < 1) return false;
         return true;
