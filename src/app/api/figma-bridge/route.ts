@@ -32,8 +32,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing figmaTree data' }, { status: 400 });
     }
 
+    // Clean tree: flatten zero-size containers (Framer/GSAP hidden elements)
+    function fixZeroSize(n: Record<string, unknown>): Record<string, unknown>[] {
+      if (!n) return [];
+      const fixed = { ...n };
+      if (Array.isArray(n.children)) {
+        const newChildren: Record<string, unknown>[] = [];
+        for (const child of n.children as Record<string, unknown>[]) {
+          newChildren.push(...fixZeroSize(child));
+        }
+        fixed.children = newChildren;
+      }
+      const w = (n.width as number) || 0;
+      const h = (n.height as number) || 0;
+      if ((w <= 0 || h <= 0) && Array.isArray(fixed.children) && (fixed.children as unknown[]).length > 0) {
+        return fixed.children as Record<string, unknown>[];
+      }
+      if (w <= 0 || h <= 0) return [];
+      return [fixed];
+    }
+
+    const cleanedResults = fixZeroSize(body.figmaTree);
+    const cleanedTree = cleanedResults[0] || body.figmaTree;
+
     // Collect image URLs from the tree and pre-fetch them
-    const imageUrls = collectImageUrlsFromTree(body.figmaTree);
+    const imageUrls = collectImageUrlsFromTree(cleanedTree);
     let imageMap = new Map<string, string>();
     if (imageUrls.length > 0) {
       const sourceUrl = body.sourceUrl || '';
@@ -45,7 +68,7 @@ export async function POST(request: NextRequest) {
     // Send to plugin with image data
     const images = Object.fromEntries(imageMap);
     const spec = {
-      figmaTree: body.figmaTree,
+      figmaTree: cleanedTree,
       pageInfo: body.pageInfo || { name: 'Cloned Page', width: 1440, height: 900 },
       images,
     };

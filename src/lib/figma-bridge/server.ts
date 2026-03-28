@@ -220,8 +220,8 @@ class FigmaBridge {
 
       const timeout = setTimeout(() => {
         this.pending.delete(requestId);
-        reject(new Error('Request timed out (30s)'));
-      }, 30_000);
+        reject(new Error('Request timed out (120s). Large sites may take longer.'));
+      }, 120_000);
 
       this.pending.set(requestId, { resolve, reject, timeout });
 
