@@ -33,6 +33,65 @@ export async function convertPageToFigmaNodes(page: Page): Promise<FigmaPageData
   // Wait for styles to apply
   await page.waitForTimeout(500);
 
+  // BLOCK 1: Clean DOM before conversion — remove invisible garbage
+  const cleanStats = await page.evaluate(() => {
+    let removed = 0;
+    let unwrapped = 0;
+
+    function cleanElement(el: Element): void {
+      // Process children first (bottom-up)
+      const children = Array.from(el.children);
+      for (const child of children) {
+        cleanElement(child);
+      }
+
+      const cs = window.getComputedStyle(el);
+      const tag = el.tagName;
+
+      // Skip body and important structural tags
+      if (tag === 'BODY' || tag === 'HTML') return;
+
+      // Remove display:none elements entirely
+      if (cs.display === 'none') {
+        el.remove();
+        removed++;
+        return;
+      }
+
+      // Remove zero-size non-structural elements with no visible children
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 1 && rect.height < 1) {
+        // Keep if it has visible children (they might be absolutely positioned)
+        const hasVisibleChild = Array.from(el.children).some(c => {
+          const cr = c.getBoundingClientRect();
+          return cr.width > 0 && cr.height > 0;
+        });
+        if (!hasVisibleChild) {
+          el.remove();
+          removed++;
+          return;
+        }
+      }
+
+      // BLOCK 2: Unwrap display:contents — children should belong to parent
+      if (cs.display === 'contents') {
+        const parent = el.parentElement;
+        if (parent) {
+          while (el.firstChild) {
+            parent.insertBefore(el.firstChild, el);
+          }
+          el.remove();
+          unwrapped++;
+        }
+      }
+    }
+
+    cleanElement(document.body);
+    return { removed, unwrapped };
+  });
+
+  console.log(`[converter] Cleaned DOM: removed ${cleanStats.removed}, unwrapped ${cleanStats.unwrapped} display:contents`);
+
   // Inject html-to-figma via addScriptTag to ensure proper browser context
   await page.addScriptTag({ content: bundleCode });
 
