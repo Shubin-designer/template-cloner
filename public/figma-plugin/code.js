@@ -168,7 +168,7 @@ var __async = (__this, __arguments, generator) => {
   }
   function buildFromHtmlToFigma(node, parent, images) {
     return __async(this, null, function* () {
-      var _a, _b, _c, _d, _e, _f, _g, _h;
+      var _a;
       if (!node || node.width < 0.5 || node.height < 0.5) return;
       if (node.type === "TEXT" && node.characters) {
         const text = figma.createText();
@@ -177,6 +177,8 @@ var __async = (__this, __arguments, generator) => {
         text.fontName = font;
         text.characters = node.characters;
         text.name = node.name || "Text";
+        text.x = Math.round(node.x);
+        text.y = Math.round(node.y);
         text.resize(Math.max(1, node.width), Math.max(1, node.height));
         if (node.fontSize) text.fontSize = node.fontSize;
         if (((_a = node.lineHeight) == null ? void 0 : _a.value) && node.lineHeight.value > 0) {
@@ -192,19 +194,22 @@ var __async = (__this, __arguments, generator) => {
           const p = applyPaint(node.color);
           if (p) text.fills = [p];
         }
-        text.textAutoResize = "HEIGHT";
-        text.layoutAlign = "STRETCH";
+        text.textAutoResize = "NONE";
         parent.appendChild(text);
         return;
       }
       if (node.type === "SVG" && node.svg) {
         try {
           const svgNode = figma.createNodeFromSvg(node.svg);
+          svgNode.x = Math.round(node.x);
+          svgNode.y = Math.round(node.y);
           svgNode.resize(Math.max(1, node.width), Math.max(1, node.height));
           svgNode.name = node.name || "SVG";
           parent.appendChild(svgNode);
         } catch (e) {
           const rect = figma.createRectangle();
+          rect.x = Math.round(node.x);
+          rect.y = Math.round(node.y);
           rect.resize(Math.max(1, node.width), Math.max(1, node.height));
           rect.fills = [{ type: "SOLID", color: { r: 0.9, g: 0.9, b: 0.9 } }];
           parent.appendChild(rect);
@@ -213,6 +218,8 @@ var __async = (__this, __arguments, generator) => {
       }
       const frame = figma.createFrame();
       frame.name = node.name || "Frame";
+      frame.x = Math.round(node.x);
+      frame.y = Math.round(node.y);
       frame.resize(Math.max(1, node.width), Math.max(node.height, 1));
       frame.clipsContent = node.clipsContent !== false;
       if (node.backgroundFill) {
@@ -303,47 +310,17 @@ var __async = (__this, __arguments, generator) => {
         }));
         frame.effects = [...existing, ...blurs];
       }
-      const hasChildren = node.children && node.children.length > 0;
-      const isGrid = node.layoutMode === "GRID";
-      const isWrap = node.layoutWrap === "WRAP";
-      if (hasChildren && isGrid && node.gridColumnCount) {
-        frame.layoutMode = "HORIZONTAL";
-        frame.layoutWrap = "WRAP";
-        frame.itemSpacing = (_b = node.itemSpacing) != null ? _b : 0;
-        frame.counterAxisSpacing = (_d = (_c = node.counterAxisSpacing) != null ? _c : node.itemSpacing) != null ? _d : 0;
-        frame.primaryAxisSizingMode = "FIXED";
-        frame.counterAxisSizingMode = "AUTO";
+      if (node.layoutMode) {
+        frame.layoutMode = node.layoutMode;
+        if (node.itemSpacing != null) frame.itemSpacing = node.itemSpacing;
         if (node.primaryAxisAlignItems) {
           frame.primaryAxisAlignItems = node.primaryAxisAlignItems;
         }
         if (node.counterAxisAlignItems) {
           frame.counterAxisAlignItems = node.counterAxisAlignItems;
         }
-      } else if (hasChildren && isWrap) {
-        frame.layoutMode = "HORIZONTAL";
-        frame.layoutWrap = "WRAP";
-        frame.itemSpacing = (_e = node.itemSpacing) != null ? _e : 0;
-        frame.counterAxisSpacing = (_g = (_f = node.counterAxisSpacing) != null ? _f : node.itemSpacing) != null ? _g : 0;
-        frame.primaryAxisSizingMode = "FIXED";
-        frame.counterAxisSizingMode = "AUTO";
-        if (node.primaryAxisAlignItems) {
-          frame.primaryAxisAlignItems = node.primaryAxisAlignItems;
-        }
-      } else if (hasChildren) {
-        const mode = node.layoutMode || "VERTICAL";
-        if (mode === "HORIZONTAL" || mode === "VERTICAL") {
-          frame.layoutMode = mode;
-          frame.itemSpacing = (_h = node.itemSpacing) != null ? _h : 0;
-          const isSmallContainer = node.width < 120 && node.height < 120;
-          frame.primaryAxisSizingMode = isSmallContainer ? "FIXED" : "AUTO";
-          frame.counterAxisSizingMode = "FIXED";
-          if (node.primaryAxisAlignItems) {
-            frame.primaryAxisAlignItems = node.primaryAxisAlignItems;
-          }
-          if (node.counterAxisAlignItems) {
-            frame.counterAxisAlignItems = node.counterAxisAlignItems;
-          }
-        }
+        frame.primaryAxisSizingMode = "AUTO";
+        frame.counterAxisSizingMode = "FIXED";
       }
       if (node.padding) {
         if (node.padding.top) frame.paddingTop = node.padding.top;
@@ -352,33 +329,12 @@ var __async = (__this, __arguments, generator) => {
         if (node.padding.left) frame.paddingLeft = node.padding.left;
       }
       parent.appendChild(frame);
-      if (node.width < 100 && node.height < 100) {
-        frame.layoutAlign = "INHERIT";
-      } else {
-        frame.layoutAlign = "STRETCH";
-      }
-      if (hasChildren) {
-        const childSizes = node.childSizes;
-        let childIdx = 0;
+      if (node.children && node.children.length > 0) {
         for (const child of node.children) {
           try {
             yield buildFromHtmlToFigma(child, frame, images);
-            if ((isGrid || isWrap) && childSizes && childIdx < childSizes.length) {
-              const lastChild = frame.children[frame.children.length - 1];
-              if (lastChild && "layoutAlign" in lastChild) {
-                lastChild.layoutAlign = "INHERIT";
-                if ("resize" in lastChild) {
-                  lastChild.resize(
-                    childSizes[childIdx].w,
-                    childSizes[childIdx].h
-                  );
-                }
-              }
-            }
-            childIdx++;
           } catch (err) {
             console.error(`Failed: ${child.name}`, err);
-            childIdx++;
           }
         }
       }
