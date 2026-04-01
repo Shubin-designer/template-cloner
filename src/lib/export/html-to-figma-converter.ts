@@ -146,11 +146,11 @@ export async function convertPageToFigmaNodes(page: Page): Promise<FigmaPageData
       } else if (isGrid) {
         info.layoutMode = 'HORIZONTAL';
         info.layoutWrap = 'WRAP';
-      } else if (cc > 0 && (cs.display==='block'||cs.display==='inline-block'||cs.display==='list-item')) {
-        info.layoutMode = 'VERTICAL';
       }
+      // DON'T enrich display:block — html-to-figma already positions them correctly
+      // Only enrich explicit flex/grid where we add value
 
-      if (!info.layoutMode) return; // only process layout containers
+      if (!info.layoutMode) return; // only process flex/grid containers
 
       // Check children overlap
       const childRects: Array<{l:number,t:number,r:number,b:number}> = [];
@@ -200,6 +200,18 @@ export async function convertPageToFigmaNodes(page: Page): Promise<FigmaPageData
       if (pr) info.paddingRight=pr;
       if (pb) info.paddingBottom=pb;
       if (pl) info.paddingLeft=pl;
+
+      // --- CHILD SIZES (for grid/wrap — children need FIXED width) ---
+      if (info.layoutWrap === 'WRAP' || isGrid) {
+        const sizes: Array<{w:number,h:number}> = [];
+        for (const child of Array.from(el.children)) {
+          const cr = child.getBoundingClientRect();
+          if (cr.width > 0 && cr.height > 0) {
+            sizes.push({ w: Math.round(cr.width), h: Math.round(cr.height) });
+          }
+        }
+        if (sizes.length) (info as Record<string,unknown>).childSizes = sizes;
+      }
 
       // --- FILL ---
       const bgC = rgbToFigmaColor(cs.backgroundColor);
@@ -261,6 +273,9 @@ export async function convertPageToFigmaNodes(page: Page): Promise<FigmaPageData
             if (info.counterAxisAlignItems) node.counterAxisAlignItems = info.counterAxisAlignItems;
             if (info.primaryAxisSizingMode) node.primaryAxisSizingMode = info.primaryAxisSizingMode;
             if (info.counterAxisSizingMode) node.counterAxisSizingMode = info.counterAxisSizingMode;
+            // Child sizes for grid/wrap
+            const cs = (info as Record<string,unknown>).childSizes;
+            if (cs) node.childSizes = cs;
           }
         }
 
