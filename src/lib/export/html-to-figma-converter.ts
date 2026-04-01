@@ -147,54 +147,56 @@ export async function convertPageToFigmaNodes(page: Page): Promise<FigmaPageData
         info.layoutMode = 'HORIZONTAL';
         info.layoutWrap = 'WRAP';
       }
-      // DON'T enrich display:block — html-to-figma already positions them correctly
-      // Only enrich explicit flex/grid where we add value
+      // DON'T enrich display:block with layout — html-to-figma already positions them correctly
+      // But DO collect visual props (fills, borders, radius) for ALL elements
 
-      if (!info.layoutMode) return; // only process flex/grid containers
-
-      // Check children overlap
-      const childRects: Array<{l:number,t:number,r:number,b:number}> = [];
-      let hasOverlap = false;
-      for (const child of Array.from(el.children)) {
-        const cr = child.getBoundingClientRect();
-        if (cr.width<1||cr.height<1) continue;
-        const childCS = window.getComputedStyle(child);
-        // position:absolute children → overlap expected
-        if (childCS.position==='absolute'||childCS.position==='fixed') { hasOverlap=true; break; }
-        const nr = {l:cr.left,t:cr.top,r:cr.right,b:cr.bottom};
-        for (const ex of childRects) {
-          if (nr.l<ex.r-2 && nr.r>ex.l+2 && nr.t<ex.b-2 && nr.b>ex.t+2) { hasOverlap=true; break; }
+      // --- LAYOUT-SPECIFIC (only for flex/grid) ---
+      if (info.layoutMode) {
+        // Check children overlap
+        const childRects: Array<{l:number,t:number,r:number,b:number}> = [];
+        let hasOverlap = false;
+        for (const child of Array.from(el.children)) {
+          const cr = child.getBoundingClientRect();
+          if (cr.width<1||cr.height<1) continue;
+          const childCS = window.getComputedStyle(child);
+          if (childCS.position==='absolute'||childCS.position==='fixed') { hasOverlap=true; break; }
+          const nr = {l:cr.left,t:cr.top,r:cr.right,b:cr.bottom};
+          for (const ex of childRects) {
+            if (nr.l<ex.r-2 && nr.r>ex.l+2 && nr.t<ex.b-2 && nr.b>ex.t+2) { hasOverlap=true; break; }
+          }
+          if (hasOverlap) break;
+          childRects.push(nr);
         }
-        if (hasOverlap) break;
-        childRects.push(nr);
-      }
-      info.hasOverlap = hasOverlap;
+        info.hasOverlap = hasOverlap;
 
-      // --- SPACING ---
-      const gap = pxVal(cs.gap) || pxVal(cs.columnGap);
-      if (gap>0) info.itemSpacing = gap;
-      const rowGap = pxVal(cs.rowGap) || pxVal(cs.gap);
-      if (rowGap>0 && info.layoutWrap==='WRAP') info.counterAxisSpacing = rowGap;
+        // Spacing
+        const gap = pxVal(cs.gap) || pxVal(cs.columnGap);
+        if (gap>0) info.itemSpacing = gap;
+        const rowGap = pxVal(cs.rowGap) || pxVal(cs.gap);
+        if (rowGap>0 && info.layoutWrap==='WRAP') info.counterAxisSpacing = rowGap;
 
-      // --- ALIGNMENT ---
-      const jc = cs.justifyContent;
-      if (jc==='center') info.primaryAxisAlignItems='CENTER';
-      else if (jc==='flex-end'||jc==='end') info.primaryAxisAlignItems='MAX';
-      else if (jc==='space-between') info.primaryAxisAlignItems='SPACE_BETWEEN';
-      const ai = cs.alignItems;
-      if (ai==='center') info.counterAxisAlignItems='CENTER';
-      else if (ai==='flex-end'||ai==='end') info.counterAxisAlignItems='MAX';
+        // Alignment
+        const jc = cs.justifyContent;
+        if (jc==='center') info.primaryAxisAlignItems='CENTER';
+        else if (jc==='flex-end'||jc==='end') info.primaryAxisAlignItems='MAX';
+        else if (jc==='space-between') info.primaryAxisAlignItems='SPACE_BETWEEN';
+        const ai = cs.alignItems;
+        if (ai==='center') info.counterAxisAlignItems='CENTER';
+        else if (ai==='flex-end'||ai==='end') info.counterAxisAlignItems='MAX';
 
-      // --- SIZING MODES ---
-      if (info.layoutWrap==='WRAP') {
-        info.primaryAxisSizingMode='FIXED';
-        info.counterAxisSizingMode='AUTO';
-      } else {
-        info.primaryAxisSizingMode='AUTO';
-        info.counterAxisSizingMode='FIXED';
+        // Sizing modes
+        if (info.layoutWrap==='WRAP') {
+          info.primaryAxisSizingMode='FIXED';
+          info.counterAxisSizingMode='AUTO';
+        } else {
+          info.primaryAxisSizingMode='AUTO';
+          info.counterAxisSizingMode='FIXED';
+        }
       }
 
-      // --- PADDING ---
+      // --- VISUAL PROPS (for ALL elements, not just flex/grid) ---
+
+      // Padding
       const pt=pxVal(cs.paddingTop), pr=pxVal(cs.paddingRight), pb=pxVal(cs.paddingBottom), pl=pxVal(cs.paddingLeft);
       if (pt) info.paddingTop=pt;
       if (pr) info.paddingRight=pr;
